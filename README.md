@@ -72,7 +72,7 @@ user profile under the section `User settings - SSH keys`
 ### Clone the TopLib repository and install TopLib
 1. You can then clone this repository to your local machine with  
     ```bash
-    git clone git@gitlab.lrz.de:repopath <target-directory>
+    git clone https://gitlab.lrz.de/lpl-tum/lpl-topologyopt/toplib.git <target-directory>
     ```
 1. [Install](http://docs.anaconda.com/anaconda/install/linux/) the latest version of 
 [Anaconda](https://www.anaconda.com/) with Python 3.x.

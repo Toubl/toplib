@@ -1,92 +1,268 @@
-# TopLib
+# Topology Optimization
+This repository contains the code of *TopLib*. A general purpose framework for Topology Optimization,
+Informed Decomposition, ...
+
+## Content
+1. [Installation and setup](#installation-and-setup)
+   1. [Setup of MongoDB](#setup-of-mongodb)
+      1. [Configuration of Git ](#configuration-of-git)
+      1. [Clone and install TopLib](#clone-the-toplib-repository-and-install-toplib)
+      1. [Setup of the database](#setup-of-the-database)
+         1. [Installation of MongoDB](#installation-of-mongodb)
+         1. [Starting MongoDB](#starting-mongodb)
+         1. [Configure MongoDB](#configure-the-database)
+   1. [Remote computing](#remote-computing)
+1. [Building the documentation](#building-the-documentation)
+1. [Run the test suite](#run-the-test-suite)
+1. [Additional information](#additional-information)
+    1. [GitLab testing machine](#make-your-machine-a-gitlab-testing-machine)
+    1. [Anaconda tips and tricks](#anaconda-tips-and-tricks)
+    1. [Kill open ssh-ports](#kill-open-ssh-ports-of-crashed-simulations)
+
+## Installation and setup
+*TopLib* needs only to be installed on the localhost (e.g., *bohr*). Computations on distributed systems
+as high-performance clusters (HPC) or computation-pools are automatically managed via 
+[Singularity images](https://singularity.lbl.gov/).
+While no Python installation is required on remote machines, the support of Singularity is necessary.
+
+[↑ Contents](#contents)
+### Configuration of Git 
+> **Note** this can be skipped if you have already configured Git for other projects
+
+A Git version >= 2.9 is required. <!-- We need at least this version to be able to configure the path to the git-hooks as outlined below. -->
+Consult the official [Git documentation](www.git-scm.org) to obtain a more recent Git installation if necessary.
+
+1. Set your username to your full name, i.e., first name followed by last name,
+and your email address to your institute email address with the following commands:
+
+    ```bash
+    git config --global user.name "<Firstname> <Lastname>"
+    git config --global user.email <instituteEmailAddress>
+    ```
+
+1. Set a default text editor that will be used whenever you need to write a message in Git. To set `vim` as your default text editor, type:
+
+    ```bash
+    git config --global core.editor vim
+    ```
+
+    > **Note:** Another popular choice is `kwrite`.
+
+1. Set path to our common set of `git-hooks`. After [cloning the repository](#clone-the-repository) into the directory `<someBaseDir>/<sourceDir>`, run
+
+    ```bash
+    cd <someBaseDir>/<sourceDir>
+    git config core.hooksPath ./utilities/code_checks/
+    ```
+   
+1. In case you are using GitLab for the first time on your machine: Add your public SSH key to your GitLab 
+user profile under the section `User settings - SSH keys`
+    1. Check for an existing SSH key pair using: 
+        ```bash 
+        cat ~/.ssh/id_rsa.pub
+        ```
+    1. In case of an empty response, a new key pair can be generated using:
+        ```bash
+        ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa
+        ```
+    1. For further instruction on how to configure your SSH key correctly please have a look at the
+     [GitLab documentation](https://gitlab.lrz.de/help/ssh/README).
+     
+[↑ Contents](#contents)
+### Clone the TopLib repository and install TopLib
+1. You can then clone this repository to your local machine with  
+    ```bash
+    git clone git@gitlab.lrz.de:repopath <target-directory>
+    ```
+1. [Install](http://docs.anaconda.com/anaconda/install/linux/) the latest version of 
+[Anaconda](https://www.anaconda.com/) with Python 3.x.
+ *Anaconda* is an open-source Python distribution and provides a
+ [virtual environment manager named *Conda*](https://docs.conda.io/projects/conda/en/latest/user-guide/concepts/environments.html) with many popular data science Python packages. 
+1. After setting up Anaconda on your machine, create a new, dedicated TopLib development environment via  
+ All required third party libraries will be installed.  
+    ```bash
+    cd <your-path-to-TopLib>
+    conda env create  
+    ```
+     advanced: for a custom environment name  
+    `conda env create -f  <your-path-to-TopLib>/environment.yml --name <your-custom-toplib-env-name>`
+1. You need to activate the newly created environment via  
+    ```bash
+    conda activate toplib
+    ```
+1. Now, TopLib can be installed in the environment using:  
+    ```bash
+    python <your-path-to-TopLib>/setup.py develop
+    ```
+If you encounter any problems try using the --user flag.
 
 
-
-## Getting started
-
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
-
+**Update your Python packages from time to time using:**<br />
+The easy (default) way:
+```bash
+cd <your-path-to-TopLib> 
+conda env update
 ```
-cd existing_repo
-git remote add origin https://gitlab.lrz.de/lpl-tum/lpl-topologyopt/toplib.git
-git branch -M main
-git push -uf origin main
+The advanced way:
+```bash
+conda env update --verbose --name <your-custom-toplib-env-name> -f <your-path-to-TopLib>/environment.yml 
 ```
 
-## Integrate with your tools
+**Update Python version of your conda environment:**<br />
+To keep in sync with the latest Python version recommended with TopLib, keep in sync with the latest
+changes on the  `main` branch and follow the normal update procedure described above.
+This will keep your `environment.yml` up to date and with it your environment.
 
-- [ ] [Set up project integrations](https://gitlab.lrz.de/lpl-tum/lpl-topologyopt/toplib/-/settings/integrations)
 
-## Collaborate with your team
+**Use conda environments in Jupyter notebooks:**<br />
+To get your conda environments into your Jupyter kernel, run:  
+`conda install nb_conda_kernels`
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Automatically merge when pipeline succeeds](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+**Uninstall:**<br />
+To uninstall *TopLib* from your conda environment, run  
+`python setup.py develop --uninstall`  
+within the activated environment.
 
-## Test and Deploy
+[↑ Contents](#contents)
+### Setup of the database
+TopLib writes results into a [MongoDB database](https://www.mongodb.com/), therefore TopLib requires certain
+ write and access rights. MongoDB does not necessarily have to run on the same machine as TopLib. 
+ In certain situations, it makes sense to have the database running on a different computer and connect to the 
+ database via port-forwarding.
 
-Use the built-in continuous integration in GitLab.
+[↑ Contents](#contents)
+####  Installation of MongoDB
+We strongly recommend the use of MongoDB version 3.4 as this is proven to work in the current framework.
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+- Installation instructions if you are running **macOS** can be found [here](https://docs.mongodb.com/master/tutorial/install-mongodb-on-os-x/?_ga=2.181134695.1149150790.1494232459-1730069423.1494232449)
+- Installation instructions for LNM workstations running **CentOS 7** can be done directly from the **CentOS 7**
+by running:
+    ```
+    sudo yum install mongodb-org
+    ```
 
-***
+[↑ Contents](#contents)
+#### Starting MongoDB
+After installation, you need to start MongoDB.
+1. For LNM machines this requires that you can execute the commands:  
+    ```bash 
+    sudo systemctl start mongod
+    ``` 
+1. (Optional) In case you encounter any problems the database can be:
+    1. stopped using:
+        ```bash
+        sudo systemctl stop mongod
+       ```  
+    1. or restarted using:
+        ```bash
+        sudo systemctl restart mongod
+        ```  
+1. (Optional) On a Mac you have to run: 
+    ```bash 
+    mongod --dbpath <path_to_your_database>`
+    ```
+    > Note: It could be that you have to edit the sudoers file `/etc/sudoers.d/` together with your administrator in order get the execution rights.
 
-# Editing this README
+[↑ Contents](#contents)
+#### Configure the database
+Edit the MongoDB config file such that it allows connections from anywhere (probably not the safest option, but ok for now).
+If you followed the standard installation instructions, you should edit the config file using  
+```bash
+sudo vim /etc/mongod.conf  
+```
+And comment out the `bindIp` like shown
+```shell
+# network interfaces
+net:
+port: 27017
+# bindIp: 127.0.0.1  <-- comment out this line
+```
+>Note: The machine running the MongoDB database does not need to be the same as either the
+machine running TopLib or the compute cluster. However, the other machines need to be
+able to connect to the MongoDB via tcp in order to write data. For that to work
+within the LNM network, all of the machines need to be connected to the internal network.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
+[↑ Contents](#contents)
+### Remote computing
+Remote computing is solved via `ssh port forwarding` and `singularity images`. Please make sure you either have an existing
+singularity image `driver.simg` or you have `singularity` installed on the localhost. 
+In CentOs7, singularity can directly be installed from the repository via:
+```bash
+sudo yum install singularity
+```
+Connecting via ssh to the compute machine and from the compute machine to the localhost needs to work passwordless. 
+Therefore, we need to copy the respective `id_rsa.pub`-keys on the localhost and the remote, once.
+Firstly, please copy the localhost's `id_rsa.pub` -key to the `authorized_keys` file on the remote, 
+while being logged-in on the localhost, using:
+```bash
+cat ~/.ssh/id_rsa.pub | ssh <username>@remote 'cat >> ~/.ssh/authorized_keys'  
+```
+Secondly, log-in onto the remote machine and then repeat copy the remote's `id_rsa.pub` -key to the `authorized_keys` file 
+on the localhost, using:
+```bash
+cat ~/.ssh/id_rsa.pub | ssh <username>@localmachine 'cat >> ~/.ssh/authorized_keys'  
+```
+In case you do not have a `id_rsa.pub`-key on the remote machine, you can generate the key by running 
+the subsequent command on the remote machine:
+```batch
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa
+```
+To learn more about how ssh-port forwarding works click 
+[here](https://chamibuddhika.wordpress.com/2012/03/21/ssh-tunnelling-explained/).
 
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+[↑ Contents](#contents)
+## Building the documentation
+TopLib uses [SPHINX](https://www.sphinx-doc.org/en/master/) to automatically build a html-documentation from docstring.
+To build it, navigate into the doc folder with:   
+```bash
+cd <toplib-base_dir>/doc
+```  
+and run:
+```bash
+make html
+```
+After adding new modules or classes to TopLib, one needs to rebuild the autodoc index by running:  
+```bash
+sphinx-apidoc -o doc/source topopt -f -M
+```
+before the make command.
 
-## Name
-Choose a self-explaining name for your project.
+[↑ Contents](#contents)
+## Run the test suite
+TopLib has a couple of unit and regression test.
+The testing strategy is more closely described in [TESTING.md](TESTING.md) 
+To run the test suite type:
+```bash  
+pytest topopt/tests -W ignore::DeprecationWarning
+```
+For more info see the [pytest documentation](https://docs.pytest.org/en/latest/warnings.html).
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+[↑ Contents](#contents)
+## Additional information
+Some further information that might be interesting when working with *TopLib* please have a look at our wiki or check 
+out the subsequent points.
+### Make your machine a GitLab testing machine
+To get started with Gitlab checkout the help section [here](https://gitlab.lrz.de/help/ci/README.md).
+CI with with gitlab requires the setup of so called runners that build and test the code.
+To turn a machine into a runner, you have to install some software as described
+[here](https://docs.gitlab.com/runner/install/linux-repository.html)
+The steps are as follows:
+1. For RHEL/CentOS/Fedora run
+    ```bash
+    curl -L https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.rpm.sh | sudo bash
+    ```
+1. To install run:  
+    ```bash
+    sudo yum install gitlab-runner
+    ```
+1. Next, you have to register the runner with your gitlab repo as described
+[here](https://docs.gitlab.com/runner/register/index.html).
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+[↑ Contents](#contents)
+### Anaconda tips and tricks
+1. Create new anaconda environment  
+`conda create -n <name_of_new_environment> python=3.7`
+2. List all packages linked into an anaconda environment  
+`conda list -n <your_environment_name`
+3. Activate environment  
+`source activate <your_environment_name>`

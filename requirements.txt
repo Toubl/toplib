@@ -1,0 +1,6 @@
+matplotlib
+numpy
+scipy
+nlopt
+cvxopt
+pathlib; python_version < '3.4'

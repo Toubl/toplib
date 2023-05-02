@@ -307,7 +307,7 @@ class ElasticityProblem(Problem):
         # Setup and solve FE problem
         K = self.build_K(xPhys)
         K = cvxopt.spmatrix(
-            K.data, K.row.astype(numpy.int), K.col.astype(numpy.int))
+            K.data, K.row.astype(int), K.col.astype(int))
         # Solve system
         F = cvxopt.matrix(self.f[self.free, :])
         cvxopt.cholmod.linsolve(K, F)  # F stores solution after solve
@@ -534,7 +534,7 @@ class HarmonicLoadsProblem(ElasticityProblem):
         M = self.build_M(xPhys)
         S = (K - self.angular_frequency**2 * M).tocoo()
         cvxopt_S = cvxopt.spmatrix(
-            S.data, S.row.astype(numpy.int), S.col.astype(numpy.int))
+            S.data, S.row.astype(int), S.col.astype(int))
         # Solve system
         F = cvxopt.matrix(self.f[self.free, :])
         try:
@@ -792,7 +792,7 @@ class VonMisesStressProblem(ElasticityProblem):
         # Setup and solve FE problem
         K = self.build_K(xPhys)
         K = cvxopt.spmatrix(
-            K.data, K.row.astype(numpy.int), K.col.astype(numpy.int))
+            K.data, K.row.astype(int), K.col.astype(int))
 
         # Setup dK @ u
         dK = self.build_dK(xPhys).tocsc()

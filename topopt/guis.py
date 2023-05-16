@@ -50,7 +50,7 @@ class GUI(object):
         """Create the subplots."""
         self.fig, self.ax = plt.subplots()
         self.im = self.ax.imshow(
-            -numpy.zeros((self.problem.nely, self.problem.nelx)), cmap='gray',
+            -numpy.zeros((self.problem.nely, self.problem.nelx)), cmap='viridis',
             interpolation='none', norm=colors.Normalize(vmin=-1, vmax=0))
 
     def plot_force_arrows(self):

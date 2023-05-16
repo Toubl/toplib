@@ -16,10 +16,10 @@ print(title)
 print(ose)
 
 
-nelx, nely = 180, 60  # Number of elements in the x and y
-volfrac = 0.4  # Volume fraction for constraints
+nelx, nely = 600, 300  # Number of elements in the x and y
+volfrac = 0.36  # Volume fraction for constraints
 penal = 3.0  # Penalty for SIMP
-rmin = 5.4  # Filter radius
+rmin = 4.4  # Filter radius
 
 # Initial solution
 x = volfrac * numpy.ones(nely * nelx, dtype=float)
@@ -33,5 +33,6 @@ gui = GUI(problem, "Topology Optimization Example")
 topopt_filter = DensityBasedFilter(nelx, nely, rmin)
 solver = TopOptSolver(problem, volfrac, topopt_filter, gui)
 x_opt = solver.optimize(x)
+print(x_opt)
 
 input("Press enter...")

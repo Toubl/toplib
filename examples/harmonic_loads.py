@@ -22,7 +22,7 @@ def main():
     """Run the example by constructing the TopOpt objects."""
     # Default input parameters
     nelx, nely, volfrac, penalty, rmin, ft = cli.parse_args(
-        nelx=300, nely=100, volfrac=0.3, penalty=3, rmin=1.4)
+        nelx=600, nely=100, volfrac=0.25, penalty=6, rmin=1.4)
     bc = MBBBeamBoundaryConditions(nelx, nely)
     problem = HarmonicLoadsProblem(bc, penalty)
     title = cli.title_str(nelx, nely, volfrac, rmin, penalty)

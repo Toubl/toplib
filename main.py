@@ -6,6 +6,8 @@ from topopt.solvers import TopOptSolver
 from topopt.filters import DensityBasedFilter
 from topopt.guis import GUI
 
+# this is a test to push my branch
+
 title = pyfiglet.figlet_format("TopOpt", font="small", width=100)
 with open('utils/ascii_ose.txt') as f:
     ose=f.read()

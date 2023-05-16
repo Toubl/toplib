@@ -20,7 +20,7 @@ def main():
     """Run the example by constructing the TopOpt objects."""
     # Default input parameters
     nelx, nely, volfrac, penalty, rmin, ft = cli.parse_args(
-        nelx=100, nely=100, volfrac=0.3, penalty=10, rmin=1.4)
+        nelx=100, nely=100, volfrac=0.36, penalty=10, rmin=1.4)
     bc = DisplacementInverterBoundaryConditions(nelx, nely)
     # bc = GripperBoundaryConditions(nelx, nely)
     # bc = CrossSensitivityExampleBoundaryConditions(nelx, nely)

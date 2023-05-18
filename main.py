@@ -5,21 +5,28 @@ from topopt.problems import ComplianceProblem
 from topopt.solvers import TopOptSolver
 from topopt.filters import DensityBasedFilter
 from topopt.guis import GUI
+from topopt.utils import read_json_file
 
 # this is a test to push my branch
 
 title = pyfiglet.figlet_format("TopOpt", font="small", width=100)
-with open('utils/ascii_ose.txt') as f:
-    ose=f.read()
+# with open('utils/ascii_ose.txt') as f:
+#     ose=f.read()
 
 print(title)
-print(ose)
+# print(ose)
 
+# Set path to json file and read in parameters
+path_to_json_file = "save.json"
+nelx, nely, volfrac, penal, rmin = read_json_file(path_to_json_file)
 
-nelx, nely = 600, 300  # Number of elements in the x and y
-volfrac = 0.36  # Volume fraction for constraints
-penal = 3.0  # Penalty for SIMP
-rmin = 4.4  # Filter radius
+# Print the values
+print('Problem Parameters:')
+print("nelx:    ", nelx)
+print("nely:    ", nely)
+print("volfrac: ", volfrac)
+print("penal:   ", penal)
+print("rmin:    ", rmin)
 
 # Initial solution
 x = volfrac * numpy.ones(nely * nelx, dtype=float)

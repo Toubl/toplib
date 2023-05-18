@@ -4,6 +4,7 @@ from __future__ import division
 import os
 import typing
 import re
+import json
 
 import numpy
 import scipy
@@ -175,3 +176,16 @@ def camel_case_split(s: str) -> typing.List[str]:
 
     """
     return camel_case_to_spaces(s).split()
+
+def read_json_file(path):
+    with open(path, "r") as infile:
+        json_data = json.load(infile)
+
+    # Access the data from the JSON file
+    nelx = json_data["nelx"]
+    nely = json_data["nely"]
+    volfrac = json_data["volfrac"]
+    penal = json_data["penal"]
+    rmin = json_data["rmin"]
+
+    return nelx, nely, volfrac, penal, rmin

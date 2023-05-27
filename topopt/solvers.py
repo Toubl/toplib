@@ -13,6 +13,8 @@ import nlopt
 
 from topopt.problems import Problem
 from topopt.filters import Filter
+from topopt.filters import DensityBasedFilter
+
 from topopt.guis import GUI
 
 
@@ -20,7 +22,7 @@ class TopOptSolver:
     """Solver for topology optimization problems using NLopt's MMA solver."""
 
     def __init__(self, problem: Problem, volfrac: float, filter: Filter,
-                 gui: GUI, maxeval=2000, ftol_rel=1e-3):
+                 gui: GUI, c_critical: float, maxeval=2000, ftol_rel=1e-3):
         """
         Create a solver to solve the problem.
 
@@ -44,7 +46,7 @@ class TopOptSolver:
         self.filter = filter
         self.gui = gui
 
-        n = problem.nelx * problem.nely
+        n = problem.nelx * problem.nely * problem.nelz
         self.opt = nlopt.opt(nlopt.LD_MMA, n)
         self.xPhys = numpy.ones(n)
 
@@ -57,9 +59,17 @@ class TopOptSolver:
         self.ftol_rel = ftol_rel
 
         # set objective and constraint functions
-        self.opt.set_min_objective(self.objective_function)
-        self.opt.add_inequality_constraint(self.volume_function, 0)
         self.volfrac = volfrac  # max volume fraction to use
+        self.c_critical = c_critical
+
+        if (c_critical == 0):
+            self.opt.set_min_objective(self.objective_function)
+            self.opt.add_inequality_constraint(self.volume_function, 0)
+        elif (c_critical != 0):
+            self.opt.set_min_objective(self.volume_function)
+            self.opt.add_inequality_constraint(self.objective_function, 0)
+            self.volfrac = 0
+
 
         # setup filter
         self.passive = problem.bc.passive_elements
@@ -161,17 +171,24 @@ class TopOptSolver:
             The objective value.
 
         """
+
         # Filter design variables
         self.filter_variables(x)
 
         # Objective and sensitivity
-        obj = self.problem.compute_objective(self.xPhys, dobj)
+        if self.problem.nelz > 1:
+            obj = self.problem.compute_compliance3(self.xPhys, dobj, self.c_critical)
+        else:
+            obj = self.problem.compute_compliance(self.xPhys, dobj, self.c_critical)
 
         # Sensitivity filtering
         self.filter.filter_objective_sensitivities(self.xPhys, dobj)
 
         # Display physical variables
-        self.gui.update(self.xPhys)
+        if self.problem.nelz == 1:
+            self.gui.update(self.xPhys)
+        #print(obj, '\n')
+        self.dc = dobj
 
         return obj
 
@@ -239,6 +256,7 @@ class TopOptSolver:
         # Sensitivity filtering
         self.filter.filter_volume_sensitivities(self.xPhys, dv)
 
+        print('Volume: ', self.xPhys.sum()/(self.problem.nelx * self.problem.nely * self.problem.nelz), '\n')
         return self.xPhys.sum() - self.volfrac * x.size
 
 
@@ -248,21 +266,79 @@ class TopOptSolver:
 #
 #
 # TODO: Port over OC to TopOptSolver
-# class OCSolver(TopOptSolver):
-#     def oc(self, x, volfrac, dc, dv, g):
-#         """ Optimality criterion """
-#         l1 = 0
-#         l2 = 1e9
-#         move = 0.2
-#         # reshape to perform vector operations
-#         xnew = np.zeros(nelx * nely)
-#         while (l2 - l1) / (l1 + l2) > 1e-3:
-#             lmid = 0.5 * (l2 + l1)
-#             xnew[:] =  np.maximum(0.0, np.maximum(x - move, np.minimum(1.0,
-#                 np.minimum(x + move, x * np.sqrt(-dc / dv / lmid)))))
-#             gt = g + np.sum((dv * (xnew - x)))
-#             if gt > 0:
-#                 l1 = lmid
-#             else:
-#                 l2 = lmid
-#         return (xnew, gt)
+class OCSolver(TopOptSolver):
+    def oc(self, x, volfrac, dc):
+        """ Optimality criterion """
+        l1 = 0
+        l2 = 1e9
+        move = volfrac / 2
+        # reshape to perform vector operations
+        xnew = numpy.zeros((len(x)))
+
+        while ((l2 - l1) / (l1 + l2)) > 1e-3:
+            lmid = 0.5 * (l2 + l1)
+            xnew[:] = numpy.maximum(0.0, numpy.maximum(x - move, numpy.minimum(1.0,
+                               numpy.minimum(x + move, x * numpy.sqrt(-dc / lmid)))))
+            gt = numpy.sum(xnew)/(self.problem.nelx * self.problem.nely * self.problem.nelz) - volfrac
+            if gt > 0:
+                l1 = lmid
+            else:
+                l2 = lmid
+        return xnew
+
+    def optimize(self, x: numpy.ndarray):
+        maxiter = 40
+        i = 0
+        j = 0
+
+        self.dc = x.copy()
+        self.xPhys = x.copy()
+
+        while maxiter > i:
+            if j == 0:
+                self.problem.f[0:6] = self.problem.f[0:6] * 0
+                self.problem.f[1] = 1
+                j = 1
+            else:
+                self.problem.f[0:6] = self.problem.f[0:6] * 0
+                self.problem.f[2] = 1
+                j = 0
+
+            self.objective_function(x, self.dc)
+            x_new = self.oc(self.xPhys, self.volfrac, self.dc)
+            x = x_new
+            i = i + 1
+
+        self.filter = DensityBasedFilter(self.problem.nelx, self.problem.nely, self.problem.nelz, 1.5)
+        i = 0
+
+        while maxiter > i:
+            # if j == 0:
+            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+            #     self.problem.f[1] = 1
+            #     j = 1
+            # else:
+            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+            #     self.problem.f[2] = 1
+            #     j = 0
+            self.objective_function(x, self.dc)
+            x_new = self.oc(self.xPhys, self.volfrac, self.dc)
+            x = x_new
+            i = i + 1
+
+        i = 0
+        while 28 > i:
+            # if j == 0:
+            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+            #     self.problem.f[1] = 1
+            #     j = 1
+            # else:
+            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+            #     self.problem.f[2] = 1
+            #     j = 0
+            self.objective_function(x, self.dc)
+            x_new = self.oc(x, self.volfrac, self.dc)
+            x = x_new
+            i = i + 1
+
+        return x

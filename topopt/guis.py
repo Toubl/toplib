@@ -24,14 +24,17 @@ class GUI(object):
             problem (topopt.Problem): problem to visualize
             title (str): title of the plot
         """
-        self.problem = problem
-        self.title = title
-        plt.ion()  # Ensure that redrawing is possible
-        self.init_subplots()
-        plt.xlabel(title)
-        # self.fig.tight_layout()
-        self.plot_force_arrows()
-        self.fig.show()
+        if problem.nelz == 1:
+            self.problem = problem
+            self.title = title
+            plt.ion()  # Ensure that redrawing is possible
+            self.init_subplots()
+            plt.xlabel(title)
+            # self.fig.tight_layout()
+            self.plot_force_arrows()
+            self.fig.show()
+
+
 
     def __str__(self):
         """Create a string representation of the solver."""

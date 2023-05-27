@@ -3,6 +3,7 @@
 import abc
 
 import numpy
+import numpy as np
 import scipy.sparse
 import scipy.sparse.linalg
 import cvxopt
@@ -46,10 +47,14 @@ class Problem(abc.ABC):
         # Problem size
         self.nelx = bc.nelx
         self.nely = bc.nely
-        self.nel = self.nelx * self.nely
+        self.nelz = bc.nelz
+        self.nel = self.nelx * self.nely * self.nelz
 
         # Count degrees of fredom
-        self.ndof = 2 * (self.nelx + 1) * (self.nely + 1)
+        if self.nelz > 1:
+            self.ndof = 3 * (self.nelx + 1) * (self.nely + 1) * (self.nelz + 1)
+        else:
+            self.ndof = 2 * (self.nelx + 1) * (self.nely + 1)
 
         # SIMP penalty
         self.penalty = penalty
@@ -62,10 +67,10 @@ class Problem(abc.ABC):
 
         # RHS and Solution vectors
         self.f = bc.forces
-        self.u = numpy.zeros(self.f.shape)
+        self.u = numpy.zeros((self.ndof, 1))
 
         # Per element objective
-        self.obje = numpy.zeros(self.nely * self.nelx)
+        self.obje = numpy.zeros(self.nely * self.nelx * self.nelz)
 
     def __str__(self) -> str:
         """Create a string representation of the problem."""
@@ -108,8 +113,8 @@ class Problem(abc.ABC):
         return rho
 
     @abc.abstractmethod
-    def compute_objective(
-            self, xPhys: numpy.ndarray, dobj: numpy.ndarray) -> float:
+    def compute_compliance(
+            self, xPhys: numpy.ndarray, dc: numpy.ndarray, c_critical) -> float:
         """
         Compute objective and its gradient.
 
@@ -124,6 +129,43 @@ class Problem(abc.ABC):
         -------
         float
             The objective value.
+
+        """
+        pass
+
+    @abc.abstractmethod
+    def compute_compliance3(
+            self, xPhys: numpy.ndarray, dc: numpy.ndarray, c_critical) -> float:
+        r"""
+        Compute compliance and its gradient.
+
+        The objective is :math:`\mathbf{f}^{T} \mathbf{u}`. The gradient of
+        the objective is
+
+        :math:`\begin{align}
+        \mathbf{f}^T\mathbf{u} &= \mathbf{f}^T\mathbf{u} -
+        \boldsymbol{\lambda}^T(\mathbf{K}\mathbf{u} - \mathbf{f})\\
+        \frac{\partial}{\partial \rho_e}(\mathbf{f}^T\mathbf{u}) &=
+        (\mathbf{K}\boldsymbol{\lambda} - \mathbf{f})^T
+        \frac{\partial \mathbf u}{\partial \rho_e} +
+        \boldsymbol{\lambda}^T\frac{\partial \mathbf K}{\partial \rho_e}
+        \mathbf{u}
+        = \mathbf{u}^T\frac{\partial \mathbf K}{\partial \rho_e}\mathbf{u}
+        \end{align}`
+
+        where :math:`\boldsymbol{\lambda} = \mathbf{u}`.
+
+        Parameters
+        ----------
+        xPhys:
+            The element densities.
+        dc:
+            The gradient of compliance.
+
+        Returns
+        -------
+        float
+            The compliance value.
 
         """
         pass
@@ -183,6 +225,205 @@ class ElasticityProblem(Problem):
             [k[7], k[2], k[1], k[4], k[3], k[6], k[5], k[0]]])
         return KE
 
+    @staticmethod
+    def lk3(E: float = 1, nu: float = 0.3, length_x: float = 1.0, length_y: float = 1.0, length_z: float = 1.0) -> numpy.ndarray:
+        # Compute 3D constitutive matrix (linear continuum mechanics)
+
+        C = E / ((1 + nu) * (1 - 2 * nu)) * numpy.array([[1 - nu, nu, nu, 0, 0, 0],
+                                                      [nu, 1 - nu, nu, 0, 0, 0],
+                                                      [nu, nu, 1 - nu, 0, 0, 0],
+                                                      [0, 0, 0, (1 - 2 * nu) / 2, 0, 0],
+                                                      [0, 0, 0, 0, (1 - 2 * nu) / 2, 0],
+                                                      [0, 0, 0, 0, 0, (1 - 2 * nu) / 2]])
+
+        # Gauss points coordinates on each direction
+        GaussPoint = [-1 / numpy.sqrt(3), 1 / numpy.sqrt(3)]
+
+        # Matrix of vertices coordinates. Generic element centered at the origin.
+        coordinates = numpy.zeros((8, 3))
+        coordinates[0, :] = [-length_x / 2, -length_y / 2, -length_z / 2]
+        coordinates[1, :] = [length_x / 2, -length_y / 2, -length_z / 2]
+        coordinates[2, :] = [length_x / 2, length_y / 2, -length_z / 2]
+        coordinates[3, :] = [-length_x / 2, length_y / 2, -length_z / 2]
+        coordinates[4, :] = [-length_x / 2, -length_y / 2, length_z / 2]
+        coordinates[5, :] = [length_x / 2, -length_y / 2, length_z / 2]
+        coordinates[6, :] = [length_x / 2, length_y / 2, length_z / 2]
+        coordinates[7, :] = [-length_x / 2, length_y / 2, length_z / 2]
+
+        # Preallocate memory for stiffness matrix
+        KE = numpy.zeros((24, 24))
+
+        # Loop over each Gauss point
+        for xi1 in GaussPoint:
+            for xi2 in GaussPoint:
+                for xi3 in GaussPoint:
+                    # Compute shape functions derivatives
+                    dShape = (1 / 8) * numpy.array([[-(1 - xi2) * (1 - xi3), (1 - xi2) * (1 - xi3),
+                                                  (1 + xi2) * (1 - xi3), -(1 + xi2) * (1 - xi3),
+                                                  -(1 - xi2) * (1 + xi3), (1 - xi2) * (1 + xi3),
+                                                  (1 + xi2) * (1 + xi3), -(1 + xi2) * (1 + xi3)],
+                                                 [-(1 - xi1) * (1 - xi3), -(1 + xi1) * (1 - xi3),
+                                                  (1 + xi1) * (1 - xi3), (1 - xi1) * (1 - xi3),
+                                                  -(1 - xi1) * (1 + xi3), -(1 + xi1) * (1 + xi3),
+                                                  (1 + xi1) * (1 + xi3), (1 - xi1) * (1 + xi3)],
+                                                 [-(1 - xi1) * (1 - xi2), -(1 + xi1) * (1 - xi2),
+                                                  -(1 + xi1) * (1 + xi2), -(1 - xi1) * (1 + xi2),
+                                                  (1 - xi1) * (1 - xi2), (1 + xi1) * (1 - xi2),
+                                                  (1 + xi1) * (1 + xi2), (1 - xi1) * (1 + xi2)]])
+
+                    # Compute Jacobian matrix
+                    JacobianMatrix = numpy.dot(dShape, coordinates)
+
+                    # Compute auxiliar matrix for construction of B-Operator
+                    auxiliar = numpy.linalg.inv(JacobianMatrix).dot(dShape)
+
+                    # Preallocate memory for B-Operator
+                    B = numpy.zeros((6, 24))
+
+                    # Construct first three rows
+                    for i in range(3):
+                        for j in range(8):
+                            B[i, 3 * j + 1 + (i - 1)] = auxiliar[i, j]
+
+                    # Construct fourth row
+                    for j in range(8):
+                        B[3, 3 * j] = auxiliar[1, j]
+                        B[3, 3 * j + 1] = auxiliar[0, j]
+
+                    # Construct fifth row
+                    for j in range(8):
+                        B[4, 3 * j + 2] = auxiliar[1, j]
+                        B[4, 3 * j + 1] = auxiliar[2, j]
+
+                    # Construct sixth row
+                    for j in range(8):
+                        B[5, 3 * j] = auxiliar[2, j]
+                        B[5, 3 * j + 2] = auxiliar[0, j]
+
+                    # Add to stiffness matrix
+                    KE += numpy.dot(numpy.dot(B.T, C), B) * numpy.linalg.det(JacobianMatrix)
+
+        return KE
+
+    def RBE2_interface(self, nelx, nely, K):
+        """
+        Create the Transformed stiffness matrix for a RBE2 interface.
+
+        Parameters
+        ----------
+        nelx, nely:
+            Element distretization in x and y.
+        K:
+            Assembled stiffness matrix without boundary conditions.
+
+        Returns
+        -------
+        K:
+            Transformed stiffness matrix with RBE2 interface.
+        """
+
+        row, col, data = K.row, K.col, K.data
+        n = K.shape[0]
+
+        # Create an expanded COO matrix
+        expanded_row = numpy.concatenate(([0, 1], row + 2))
+        expanded_col = numpy.concatenate(([0, 1], col + 2))
+        expanded_data = numpy.concatenate(([0, 0], data))
+        K_ = scipy.sparse.coo_matrix((expanded_data, (expanded_row, expanded_col)), shape=(n + 2, n + 2))
+
+        if hasattr(self, 'T_r'):
+            # Code to execute when self.T_r exists
+            K = self.T_r.transpose() @ K_ @ self.T_r
+        else:
+            # Code to execute when self.T_r does not exist
+            alldofs0_r = numpy.arange(0, K_.shape[0])  # All dofs in original order
+            sdofs_r = numpy.arange(K_.shape[0] - 2 * (nely + 1), K_.shape[0])  # Dofs that are to be removed
+            mdofs_r = numpy.setdiff1d(alldofs0_r, sdofs_r)  # Dofs that remain
+
+            C = scipy.sparse.coo_matrix((len(sdofs_r), K_.shape[1]))
+            C = C.toarray()
+
+            for n in range(0, nely + 1):
+                C[2 * n, 0] = 0
+                C[2 * n + 1, 0] = 1
+                C_t = numpy.cross([0, 0, 1], [0, (0.1 - 0.1 * n / nely) - 0.05, 0])
+                C[2 * n, 1] = C_t[0]
+                C[2 * n + 1, 1] = C_t[1]
+                C[2 * n, (nely + 1) * nelx * 2 + 2 * n + 2] = -1
+                C[2 * n + 1, (nely + 1) * nelx * 2 + 2 * n + 3] = -1
+
+            Tsm = -numpy.linalg.solve(C[:, sdofs_r], C[:, mdofs_r])
+            Ti = numpy.eye(len(mdofs_r))
+            self.T_r = scipy.sparse.coo_matrix(numpy.vstack((Ti, Tsm)))
+            K = self.T_r.transpose() @ K_ @ self.T_r
+        return K
+    def RBE3_interface(self, nelx, nely, nelz, K):
+        """
+        Create the Transformed stiffness matrix for a RBE2 interface.
+
+        Parameters
+        ----------
+        nelx, nely:
+            Element distretization in x and y.
+        K:
+            Assembled stiffness matrix without boundary conditions.
+
+        Returns
+        -------
+        K:
+            Transformed stiffness matrix with RBE2 interface.
+        """
+
+        row, col, data = K.row, K.col, K.data
+        n = K.shape[0]
+
+        # Create an expanded COO matrix
+        expanded_row = numpy.concatenate(([0, 1, 2, 3, 4, 5], row + 6))
+        expanded_col = numpy.concatenate(([0, 1, 2, 3, 4, 5], col + 6))
+        expanded_data = numpy.concatenate(([0, 0, 0, 0, 0, 0], data))
+        K_ = scipy.sparse.coo_matrix((expanded_data, (expanded_row, expanded_col)), shape=(n + 6, n + 6))
+
+        if hasattr(self, 'T_r'):
+            # Code to execute when self.T_r exists
+            K_r = self.T_r.transpose() @ K_ @ self.T_r
+        else:
+            # Code to execute when self.T_r does not exist
+            alldofs_r = numpy.arange(0, K_.shape[0])
+            sdofs_r = alldofs_r[-3*(nely+1)*(nelz+1):K_.shape[0]]
+            mdofs_r = numpy.setdiff1d(alldofs_r, sdofs_r)
+
+            C = scipy.sparse.coo_matrix((3*(nely+1)*(nelz+1), K_.shape[0]))
+            C = C.toarray()
+
+            m = 0
+            column_start = -3*(nely+1)*(nelz+1)
+            for i in range(0, (nelz + 1)):
+                for j in range(0, (nely + 1)):
+                    C[3 * m + 0, 0] = 1  # x Transl. DOF of free node --> x Transl. Dof
+                    C[3 * m + 1, 1] = 1  # y Transl. DOF of free node --> y Transl. Dof
+                    C[3 * m + 2, 2] = 1  # z Transl. DOF of free node --> z Transl. Dof
+
+                    C[3 * m + 1, 3] = nelz/nelx * (0.5 - i/nelz)  # x Rotational DOF of free node --> -y Transl
+                    C[3 * m + 2, 3] = nely/nelx * (0.5 - j/nely)  # x Rotational DOF of free node --> z Transl
+
+                    C[3 * m + 0, 4] = -nelz/nelx * (0.5 - i/nelz)  # y Rotational DOF of free node --> x Transl
+                    C[3 * m + 2, 4] = 0  # y Rotational DOF of free node --> z Transl
+
+                    C[3 * m + 0, 5] = -nely/nelx * (0.5 - j/nely)  # z Rotational DOF of free node --> x Transl
+                    C[3 * m + 1, 5] = 0  # z Rotational DOF of free node --> y Transl
+
+                    C[3 * m + 0, 3 * m + 0 + column_start] = -1  # Slave nodes of 3d elements to be removed
+                    C[3 * m + 1, 3 * m + 1 + column_start] = -1  # Slave nodes of 3d elements to be removed
+                    C[3 * m + 2, 3 * m + 2 + column_start] = -1  # Slave nodes of 3d elements to be removed
+
+                    m = m + 1
+            Tsm = -numpy.linalg.solve(C[:, sdofs_r], C[:, mdofs_r])
+            Tsm = scipy.sparse.coo_matrix(Tsm)
+            Ti = scipy.sparse.eye(len(mdofs_r))
+            self.T_r = scipy.sparse.vstack((Ti, Tsm))
+            K_r = self.T_r.transpose() @ K_ @ self.T_r
+        return K_r
+
     def __init__(self, bc: BoundaryConditions, penalty: float):
         """
         Create the topology optimization problem.
@@ -202,7 +443,14 @@ class ElasticityProblem(Problem):
 
         # FE: Build the index vectors for the for coo matrix format.
         self.nu = 0.3
-        self.build_indices()
+
+        # build indices(assignment local to global dof)
+        # and calculate element stiffness matrix
+        if self.nelz > 1: # 3D case
+            self.build_indices3()
+        else: # 2D case
+            self.build_indices()
+
 
         # BC's and support (half MBB-beam)
         self.bc = bc
@@ -228,6 +476,25 @@ class ElasticityProblem(Problem):
         # Construct the index pointers for the coo format
         self.iK = numpy.kron(self.edofMat, numpy.ones((8, 1))).flatten()
         self.jK = numpy.kron(self.edofMat, numpy.ones((1, 8))).flatten()
+
+    def build_indices3(self) -> None:
+        """Build the index vectors for the finite element coo matrix format."""
+        self.KE = self.lk3(E=self.Emax, nu=self.nu)
+        nodenrs = numpy.reshape(numpy.arange(1, (1 + self.nelx) * (1 + self.nely) * (1 + self.nelz) + 1, dtype=numpy.int32),
+                             (1 + self.nely, 1 + self.nelz, 1 + self.nelx), order='F')  # nodes numbering             #3D#
+        edofVec = numpy.reshape(3 * nodenrs[0:self.nely, 0:self.nelz, 0:self.nelx] + 1, (self.nel, 1), order='F')  # #3D#
+
+        a = 3 * (self.nely + 1) * (self.nelz + 1)
+        b = 3 * (self.nely + 1)
+        c = 3 * (self.nely + 1) * (self.nelz + 2)
+        d = 3 * (self.nely + 1)
+        self.edofMat = edofVec + numpy.array([0, 1, 2, a, a + 1, a + 2, a - 3, a - 2, a - 1, -3, -2, -1,
+                                      b, b + 1, b + 2, c, c + 1, c + 2, c - 3, c - 2, c - 1,
+                                      d - 3, d - 2, d - 1],
+                                     dtype=numpy.int32) - 1  # connectivity matrix         #3D#
+        # Construct the index pointers for the coo format
+        self.iK = numpy.kron(self.edofMat, numpy.ones((24, 1))).flatten()
+        self.jK = numpy.kron(self.edofMat, numpy.ones((1, 24))).flatten()
 
     def compute_young_moduli(self, x: numpy.ndarray, dE: numpy.ndarray = None
                              ) -> numpy.ndarray:
@@ -279,9 +546,39 @@ class ElasticityProblem(Problem):
               self.compute_young_moduli(xPhys)).flatten(order='F')
         K = scipy.sparse.coo_matrix(
             (sK, (self.iK, self.jK)), shape=(self.ndof, self.ndof))
+        K = self.RBE2_interface(self.nelx, self.nely, K)
         if remove_constrained:
             # Remove constrained dofs from matrix and convert to coo
-            K = deleterowcol(K.tocsc(), self.fixed, self.fixed).tocoo()
+            #K = deleterowcol(K.tocsc(), self.fixed, self.fixed).tocoo()
+            K = deleterowcol(K.tocsc(), self.fixed + 2, self.fixed + 2).tocoo()
+        return K
+    def build_K3(self, xPhys: numpy.ndarray, remove_constrained: bool = True
+                ) -> scipy.sparse.coo_matrix:
+        """
+        Build the stiffness matrix for the problem.
+
+        Parameters
+        ----------
+        xPhys:
+            The element densisities used to build the stiffness matrix.
+        remove_constrained:
+            Should the constrained nodes be removed?
+
+        Returns
+        -------
+        scipy.sparse.coo_matrix
+            The stiffness matrix for the mesh.
+
+        """
+        sK = ((self.KE.flatten()[numpy.newaxis]).T *
+              self.compute_young_moduli(xPhys)).flatten(order='F')
+        K = scipy.sparse.coo_matrix(
+            (sK, (self.iK, self.jK)), shape=(self.ndof, self.ndof))
+        K = self.RBE3_interface(self.nelx, self.nely, self.nelz, K)
+        if remove_constrained:
+            # Remove constrained dofs from matrix and convert to coo
+            K = deleterowcol(K.tocsc(), self.fixed + 6, self.fixed + 6).tocoo()
+            #K = numpy.delete(numpy.delete(K, self.fixed, axis=0), self.fixed, axis=1)
         return K
 
     def compute_displacements(self, xPhys: numpy.ndarray) -> numpy.ndarray:
@@ -309,12 +606,59 @@ class ElasticityProblem(Problem):
         K = cvxopt.spmatrix(
             K.data, K.row.astype(int), K.col.astype(int))
         # Solve system
-        F = cvxopt.matrix(self.f[self.free, :])
+        F = numpy.zeros(len(self.f) - 4 * (self.nely + 1) + 2) # Force vector of reduced problem
+        F[0] = 1 # F_y
+        F[1] = 0.1 # Moment about z-Axis
+
+        F = cvxopt.matrix(F)
+        #F = cvxopt.matrix(self.f[self.free, :])
         cvxopt.cholmod.linsolve(K, F)  # F stores solution after solve
+        zeros_to_insert = numpy.zeros(len(self.fixed))  # Create an array of zeros
+        F = numpy.insert(F, 2, zeros_to_insert)  # Insert zeros of fixed dofs
+        F = self.T_r @ F # retransform to inlude slave nodes
+        F = F[2:] #delete master node dof
         new_u = self.u.copy()
-        new_u[self.free, :] = numpy.array(F)[:, :]
+        #new_u[self.free, :] = numpy.array(F)[:, :]
+        new_u[:, 0] = numpy.array(F)[:]
         return new_u
 
+    def compute_displacements3(self, xPhys: numpy.ndarray) -> numpy.ndarray:
+        """
+        Compute the displacements given the densities.
+
+        Compute the displacment, :math:`u`, using linear elastic finite
+        element analysis (solving :math:`Ku = f` where :math:`K` is the
+        stiffness matrix and :math:`f` is the force vector).
+
+        Parameters
+        ----------
+        xPhys:
+            The element densisities used to build the stiffness matrix.
+
+        Returns
+        -------
+        numpy.ndarray
+            The distplacements solve using linear elastic finite element
+            analysis.
+
+        """
+        # Setup and solve FE problem
+        K = self.build_K3(xPhys)
+        F = self.f  # Force vector of reduced problem
+        F = cvxopt.matrix(F)
+        K = cvxopt.spmatrix(
+            K.data, K.row.astype(int), K.col.astype(int))
+        # Solve system
+        cvxopt.cholmod.linsolve(K, F)  # F stores solution after solve
+        # print('Displacement: ', (self.f * F).sum(), '\n')
+        zeros_to_insert = numpy.zeros(len(self.fixed))  # Create an array of zeros
+        F = numpy.insert(F, 6, zeros_to_insert)  # Insert zeros of fixed dofs
+        F = self.T_r @ F  # retransform to inlude slave nodes
+        u_m = F[0:6]
+        F = F[6:]  #delete master node dof
+        new_u = self.u.copy()
+        new_u[:, 0] = numpy.array(F)[:]
+        return new_u, u_m
     def update_displacements(self, xPhys: numpy.ndarray) -> None:
         """
         Update the displacements of the problem.
@@ -327,6 +671,17 @@ class ElasticityProblem(Problem):
         """
         self.u[:, :] = self.compute_displacements(xPhys)
 
+    def update_displacements3(self, xPhys: numpy.ndarray) -> None:
+        """
+        Update the displacements of the problem.
+
+        Parameters
+        ----------
+        xPhys:
+            The element densisities used to compute the displacements.
+
+        """
+        self.u[:, :], _ = self.compute_displacements3(xPhys)
 
 class ComplianceProblem(ElasticityProblem):
     r"""
@@ -344,8 +699,8 @@ class ComplianceProblem(ElasticityProblem):
     is the volume.
     """
 
-    def compute_objective(
-            self, xPhys: numpy.ndarray, dobj: numpy.ndarray) -> float:
+    def compute_compliance(
+            self, xPhys: numpy.ndarray, dc: numpy.ndarray, c_critical) -> float:
         r"""
         Compute compliance and its gradient.
 
@@ -381,19 +736,104 @@ class ComplianceProblem(ElasticityProblem):
         # Setup and solve FE problem
         self.update_displacements(xPhys)
 
-        obj = 0.0
-        dobj[:] = 0.0
+        c = 0.0
+        dc[:] = 0.0
         dE = numpy.empty(xPhys.shape)
         E = self.compute_young_moduli(xPhys, dE)
         for i in range(self.nloads):
             ui = self.u[:, i][self.edofMat].reshape(-1, 8)
             self.obje[:] = (ui @ self.KE * ui).sum(1)
-            obj += (E * self.obje).sum()
-            dobj[:] += -dE * self.obje
-        dobj /= float(self.nloads)
-        return obj / float(self.nloads)
+            c += (E * self.obje).sum()
+            dc[:] += -dE * self.obje
+        dc /= float(self.nloads)
+        return c - c_critical
+    def compute_compliance3(
+            self, xPhys: numpy.ndarray, dc: numpy.ndarray, c_critical) -> float:
+        r"""
+        Compute compliance and its gradient.
 
+        The objective is :math:`\mathbf{f}^{T} \mathbf{u}`. The gradient of
+        the objective is
 
+        :math:`\begin{align}
+        \mathbf{f}^T\mathbf{u} &= \mathbf{f}^T\mathbf{u} -
+        \boldsymbol{\lambda}^T(\mathbf{K}\mathbf{u} - \mathbf{f})\\
+        \frac{\partial}{\partial \rho_e}(\mathbf{f}^T\mathbf{u}) &=
+        (\mathbf{K}\boldsymbol{\lambda} - \mathbf{f})^T
+        \frac{\partial \mathbf u}{\partial \rho_e} +
+        \boldsymbol{\lambda}^T\frac{\partial \mathbf K}{\partial \rho_e}
+        \mathbf{u}
+        = \mathbf{u}^T\frac{\partial \mathbf K}{\partial \rho_e}\mathbf{u}
+        \end{align}`
+
+        where :math:`\boldsymbol{\lambda} = \mathbf{u}`.
+
+        Parameters
+        ----------
+        xPhys:
+            The element densities.
+        dc:
+            The gradient of compliance.
+
+        Returns
+        -------
+        float
+            The compliance value.
+
+        """
+        # Setup and solve FE problem
+        self.update_displacements3(xPhys)
+
+        c = 0.0
+        dc[:] = 0.0
+        dE = numpy.empty(xPhys.shape)
+        E = self.compute_young_moduli(xPhys, dE)
+        for i in range(self.nloads):
+            ui = self.u[:, i][self.edofMat].reshape(-1, 24)
+            self.obje[:] = (ui @ self.KE * ui).sum(1)
+            c += (E * self.obje).sum()
+            dc[:] += -dE * self.obje
+        dc /= float(self.nloads)
+        print('Displacement: ', c, '\n')
+        return c - c_critical
+    def compute_reduced_stiffness(self, x_opt: numpy.ndarray):
+        return 0
+    def compute_reduced_stiffness3(self, x_opt: numpy.ndarray):
+        K_red = numpy.zeros((6, 6))
+        C_red = numpy.zeros((6, 6))
+
+        print("volfrac:")
+        print(x_opt.sum()/(self.nelx * self.nely * self.nelz))
+        print("nelx, nely, nelz:")
+        print((self.nelx, self.nely, self.nelz), '\n')
+        print("F:")
+        print(numpy.transpose(self.f[0:6]))
+        for i in range(0, 6):
+            self.f[0:6] = 0 * self.f[0:6]
+            self.f[i] = 1
+            _, U = self.compute_displacements3(x_opt)
+            C_red[:, i] = numpy.transpose(U)
+        K_red = numpy.linalg.inv(C_red)
+
+        # Calculate the threshold for cutting off entries
+        threshold = numpy.max(np.abs(K_red)) * 1e-6
+
+        # Apply the threshold and update the array
+        K_red = numpy.where(np.abs(K_red) >= threshold, K_red, 0)
+
+        # Calculate the threshold for cutting off entries
+        threshold = numpy.max(np.abs(C_red)) * 1e-6
+
+        # Apply the threshold and update the array
+        C_red = numpy.where(np.abs(C_red) >= threshold, C_red, 0)
+
+        numpy.set_printoptions(precision=4)
+
+        print("C_red:")
+        print(C_red, '\n')
+        print("K_red:")
+        print(K_red, '\n')
+        return K_red
 class HarmonicLoadsProblem(ElasticityProblem):
     r"""
     Topology optimization problem to minimize dynamic compliance.

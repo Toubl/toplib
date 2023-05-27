@@ -25,7 +25,7 @@ class BoundaryConditions(abc.ABC):
 
     """
 
-    def __init__(self, nelx: int, nely: int):
+    def __init__(self, nelx: int, nely: int, nelz: int):
         """
         Create the boundary conditions with the size of the grid.
 
@@ -39,7 +39,13 @@ class BoundaryConditions(abc.ABC):
         """
         self.nelx = nelx
         self.nely = nely
-        self.ndof = 2 * (nelx + 1) * (nely + 1)
+        self.nelz = nelz
+
+        if self.nelz > 1:  # 3D case
+            self.ndof = 3 * (nelx + 1) * (nely + 1) * (nelz + 1)
+        else:  # 2D case
+            self.ndof = 2 * (nelx + 1) * (nely + 1)
+
 
     def __str__(self) -> str:
         """Construct a string representation of the boundary conditions."""
@@ -74,7 +80,27 @@ class BoundaryConditions(abc.ABC):
         """:obj:`numpy.ndarray`: Active elements to be set to full density."""
         return numpy.array([])
 
+class FixedBeamBoundaryConditions(BoundaryConditions):
+    """Boundary conditions for a beam fixed on one end."""
 
+    @property
+    def fixed_nodes(self):
+        """:obj:`numpy.ndarray`: Fixed nodes in the bottom corners."""
+        dofs = numpy.arange(self.ndof)
+
+        if self.nelz > 1:  # 3D case
+            fixed = dofs[0:3 * (self.nelz + 1) * (self.nely + 1)]
+            #  fixed = numpy.arange(0, 6)
+        else:  # 2D case
+            fixed = dofs[0:2 * (self.nely + 1)]
+
+        return fixed
+
+    @property
+    def forces(self):
+        """:obj:`numpy.ndarray`: Force vector in the top center."""
+        f = numpy.zeros((self.ndof - 2 * 3 * (self.nely + 1) * (self.nelz + 1) + 6, 1))
+        return f
 class MBBBeamBoundaryConditions(BoundaryConditions):
     """Boundary conditions for the Messerschmitt–Bölkow–Blohm (MBB) beam."""
 

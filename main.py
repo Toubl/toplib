@@ -4,7 +4,7 @@ from topopt.boundary_conditions import MBBBeamBoundaryConditions
 from topopt.problems import ComplianceProblem
 from topopt.solvers import TopOptSolver
 from topopt.filters import DensityBasedFilter
-from topopt.guis import GUI
+from topopt.guis import GUI, newGUI
 from topopt.utils import read_json_file
 
 # this is a test to push my branch
@@ -36,6 +36,7 @@ bc = MBBBeamBoundaryConditions(nelx, nely)
 
 # Problem to optimize given objective and constraints
 problem = ComplianceProblem(bc, penal)
+# gui = GUI(problem, "Topology Optimization Example")
 gui = GUI(problem, "Topology Optimization Example")
 topopt_filter = DensityBasedFilter(nelx, nely, rmin)
 solver = TopOptSolver(problem, volfrac, topopt_filter, gui)

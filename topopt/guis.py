@@ -58,7 +58,7 @@ class GUI(object):
 
     def plot_force_arrows(self):
         """Add arrows to the plot for each force."""
-        arrowprops = {"arrowstyle": "->", "connectionstyle": "arc3", "lw": "2",
+        arrowprops = {"arrowstyle": "->", "connectionstyle": "arc3", "lw": 2,
                       "color": 0}
         nelx, nely, f = (self.problem.nelx, self.problem.nely, self.problem.f)
         cmap = plt.cm.get_cmap("hsv", f.shape[1] + 1)

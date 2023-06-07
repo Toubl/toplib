@@ -90,7 +90,18 @@ class FixedBeamBoundaryConditions(BoundaryConditions):
 
         if self.nelz > 1:  # 3D case
             fixed = dofs[0:3 * (self.nelz + 1) * (self.nely + 1)]
-            #  fixed = numpy.arange(0, 6)
+            # for i in range(self.nelx):
+            #     fixed2 = dofs[2 + 3 * i * (self.nelz + 1) * (self.nely + 1):2 + 3 * (self.nely + 1) + 3 * i * (self.nelz + 1) * (self.nely + 1):3]
+            #     fixed = numpy.union1d(fixed, fixed2)
+            # fixed2 = dofs[2:-1 - 3 * (self.nelz + 1) * (self.nely + 1):3 * (self.nely + 1)]
+            # fixed = numpy.union1d(fixed, fixed2)
+            # fixed2 = dofs[0:-1 - 3 * (self.nelz + 1) * (self.nely + 1):3 * (self.nely + 1)]
+            # fixed = numpy.union1d(fixed, fixed2)
+
+            # fixed = dofs[0:3 * (int(self.nelz / 2) + 1) * (self.nely + 1)]
+            # for i in range(self.nelx):
+            #     fixed2 = dofs[2 + 3 * i * (int(self.nelz/2) + 1) * (self.nely + 1):2 + 3 * (self.nely + 1) + 3 * i * (int(self.nelz/2) + 1) * (self.nely + 1):3]
+            #     fixed = numpy.union1d(fixed, fixed2)
         else:  # 2D case
             fixed = dofs[0:2 * (self.nely + 1)]
 
@@ -99,8 +110,11 @@ class FixedBeamBoundaryConditions(BoundaryConditions):
     @property
     def forces(self):
         """:obj:`numpy.ndarray`: Force vector in the top center."""
-        f = numpy.zeros((self.ndof - 2 * 3 * (self.nely + 1) * (self.nelz + 1) + 6, 1))
+        f = self.f
         return f
+    def set_forces(self, F):
+        self.f = numpy.zeros((self.ndof - 2 * 3 * (self.nely + 1) * (self.nelz + 1) + 6, F.shape[1]))
+        self.f[0:6, :] = F
 class MBBBeamBoundaryConditions(BoundaryConditions):
     """Boundary conditions for the Messerschmitt–Bölkow–Blohm (MBB) beam."""
 

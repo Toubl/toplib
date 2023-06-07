@@ -7,8 +7,8 @@ def create_stl_file(voxel_data):
         for j in range(len(voxel_data[i])):
             num_elements += len(voxel_data[i][j])
 
-    vertices = numpy.zeros((num_elements * 3 * 6, 3))
-    faces = numpy.zeros((num_elements * 6, 3))
+    vertices = numpy.zeros((num_elements * 3 * 6 * 2, 3))
+    faces = numpy.zeros((num_elements * 6 * 2, 3))
     i = 0
     j = 0
     # Iterate over each voxel in the data
@@ -104,50 +104,10 @@ def create_stl_file(voxel_data):
     return vertices, faces, i, j
 
 
-def x_to_stl(nely, nelz, nelx, tol, output_filename):
-    # Example usage
-    filename = "x_opt.txt"  # Specify the name of your text file
+def x_to_stl(nelx, nely, nelz, tol, x, output_filename):
 
-    # Read the vector from the text file
-    with open(filename, "r") as file:
-        x_opt = [float(line.strip()) for line in file]
+    volume = numpy.reshape(x, (nelx, nely, nelz), order='C') > tol
 
-    # Assuming you have a 3D array 'design_domain' representing the discretized cubes
-    # And a corresponding 3D array 'degree_of_saturation' representing the degree of saturation for each cube
-
-    design_domain = numpy.reshape(x_opt,(nelz, nely, nelx))
-    # Create meshgrid for the axes
-    y, x, z = numpy.meshgrid(numpy.arange(design_domain.shape[0]),
-                          numpy.arange(design_domain.shape[1]),
-                          numpy.arange(design_domain.shape[2]))
-
-    x = numpy.reshape(x, (len(x_opt)))
-    y = numpy.reshape(y, (len(x_opt)))
-    z = numpy.reshape(z, (len(x_opt)))
-
-    x_opt_new = []
-    x_new = []
-    y_new = []
-    z_new = []
-
-    for i in range(len(x_opt)):
-        if x_opt[i] >= tol:
-            x_opt_new.append(x_opt[i])
-            x_new.append(x[i])
-            y_new.append(y[i])
-            z_new.append(z[i])
-
-    x = x_new
-    y = y_new
-    z = z_new
-
-    x_length = numpy.max(x) + 1
-    y_length = numpy.max(y) + 1
-    z_length = numpy.max(z) + 1
-
-    # # Create a binary array to represent the volume
-    volume = numpy.zeros((x_length, y_length, z_length), dtype=bool)
-    volume[x, y, z] = True
 
     vertices, faces, i, j = create_stl_file(volume)
 
@@ -162,3 +122,64 @@ def x_to_stl(nely, nelz, nelx, tol, output_filename):
 
     # Write the mesh to file "cube.stl"
     cube.save(output_filename)
+
+
+
+# import trimesh
+#
+# # Load the STL file
+# mesh2 = trimesh.load_mesh('output.stl')
+#
+# # Smooth the mesh using Humphrey smoothing
+# mesh2 = trimesh.smoothing.filter_humphrey(mesh2, alpha=1, beta=0, iterations=100)
+# mesh2 = mesh2.subdivide()
+# mesh2 = trimesh.smoothing.filter_humphrey(mesh2, alpha=1, beta=0, iterations=100)
+#
+# # Save the smoothed mesh as an STL file
+# mesh2.export('smooth.stl')
+
+    import numpy as np
+    from pyvista import CellType
+    import pyvista
+
+    # Define the coordinate ranges
+    x_range = np.linspace(0, volume.shape[0], num=volume.shape[0] + 1)
+    y_range = np.linspace(0, volume.shape[1], num=volume.shape[1] + 1)
+    z_range = np.linspace(0, volume.shape[2], num=volume.shape[2] + 1)
+
+    # Create the meshgrid
+    X, Y, Z = np.meshgrid(x_range, y_range, z_range, indexing='ij')
+    X = np.reshape(X, (-1, 1))
+    Y = np.reshape(Y, (-1, 1))
+    Z = np.reshape(Z, (-1, 1))
+    points = np.stack((X, Y, Z), axis=1)
+    points = np.squeeze(points)
+    indices = np.arange((volume.shape[0] + 1) * (volume.shape[1] + 1) * (volume.shape[2] + 1))
+    indices = np.reshape(indices, (volume.shape[0] + 1, volume.shape[1] + 1, volume.shape[2] + 1))
+
+    m = 0
+    for x in range(volume.shape[0]):
+        for y in range(volume.shape[1]):
+            for z in range(volume.shape[2]):
+                if volume[x, y, z]:
+                    cell = np.array([8, indices[x, y, z], indices[x + 1, y, z], indices[x + 1, y + 1, z], indices[x, y + 1, z],
+                                     indices[x, y, z + 1], indices[x + 1, y, z + 1], indices[x + 1, y + 1, z + 1], indices[x, y + 1, z + 1]])
+
+                    cell_type = np.array([CellType.HEXAHEDRON], np.int8)
+                    if m == 0:
+                        cell_types = cell_type
+                        cells = cell
+                    else:
+                        cell_types = np.concatenate((cell_types, cell_type))
+                        cells = np.concatenate((cells, cell))
+                    m += 8
+
+    grid = pyvista.UnstructuredGrid(cells, cell_types, points)
+    surf = grid.extract_geometry()
+
+
+    smooth_w_taubin = surf.smooth_taubin(n_iter=50, pass_band=0.5)
+    surf.plot(show_edges=True, show_scalar_bar=False)
+
+    filename = "smooth.stl"
+    smooth_w_taubin.save(filename)

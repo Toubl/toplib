@@ -4,7 +4,7 @@ from topopt.boundary_conditions import MBBBeamBoundaryConditions
 from topopt.problems import ComplianceProblem
 from topopt.solvers import TopOptSolver
 from topopt.filters import DensityBasedFilter
-from topopt.guis import GUI, newGUI
+from topopt.guis import GUI
 from topopt.utils import read_json_file
 
 # this is a test to push my branch

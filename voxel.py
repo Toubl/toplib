@@ -106,7 +106,7 @@ def create_stl_file(voxel_data):
 
 def x_to_stl(nelx, nely, nelz, tol, x, output_filename):
 
-    volume = numpy.reshape(x, (nelx, nely, nelz), order='C') > tol
+    volume = numpy.reshape(x, (nelx, nelz, nely), order='C') > tol
 
 
     vertices, faces, i, j = create_stl_file(volume)

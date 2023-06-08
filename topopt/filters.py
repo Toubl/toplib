@@ -39,21 +39,22 @@ class Filter(abc.ABC):
             jH = numpy.zeros(nfilter)
             sH = numpy.zeros(nfilter)
             cc = 0
+
             for i in range(nelx):
-                for j in range(nely):
-                    for h in range(nelz):
-                        row = i * nely * nelz + j * nelz + h
+                for j in range(nelz):
+                    for h in range(nely):
+                        row = i * nelz * nely + j * nely + h
                         kk1 = int(numpy.maximum(i - (numpy.ceil(rmin) - 1), 0))
                         kk2 = int(numpy.minimum(i + numpy.ceil(rmin), nelx))
                         ll1 = int(numpy.maximum(j - (numpy.ceil(rmin) - 1), 0))
-                        ll2 = int(numpy.minimum(j + numpy.ceil(rmin), nely))
+                        ll2 = int(numpy.minimum(j + numpy.ceil(rmin), nelz))
                         mm1 = int(numpy.maximum(h - (numpy.ceil(rmin) - 1), 0))
-                        mm2 = int(numpy.minimum(h + numpy.ceil(rmin), nelz))
+                        mm2 = int(numpy.minimum(h + numpy.ceil(rmin), nely))
 
                         for k in range(kk1, kk2):
                             for l in range(ll1, ll2):
                                 for m in range(mm1, mm2):
-                                    col = k * nely * nelz + l * nelz + m
+                                    col = k * nelz * nely + l * nely + m
                                     fac = rmin - numpy.sqrt(
                                         ((i - k) * (i - k) + (j - l) * (j - l) + (h - m) * (h - m)))
                                     iH[cc] = row

@@ -180,6 +180,7 @@ def x_to_stl(nelx, nely, nelz, tol, x, output_filename):
 
     smooth_w_taubin = surf.smooth_taubin(n_iter=50, pass_band=0.5)
     surf.plot(show_edges=True, show_scalar_bar=False)
+    smooth_w_taubin.plot(show_edges=True, show_scalar_bar=False)
 
     filename = "smooth.stl"
     smooth_w_taubin.save(filename)

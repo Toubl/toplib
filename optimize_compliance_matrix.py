@@ -51,8 +51,18 @@ problem = ComplianceProblem(bc, penal)
 gui = GUI(problem, "Topology Optimization Example")
 topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 
-C_desired_y = 1.0 * numpy.array([[800, 1600], [1600, 4000]])
-C_desired_z = 1.0 * numpy.array([[800, -1600], [-1600, 4000]])
+a = 3000
+b = 3000
+c = 825
+
+change = 1
+change_x = (change - 1) * b ** 2 / (4 * a)
+a = a * change
+b = b * change
+c = c + change_x
+
+C_desired_y = numpy.array([[c, b / 2], [b / 2, a]])
+C_desired_z = 2 * numpy.array([[c, -b / 2], [-b / 2, a]])
 
 if numpy.linalg.det(C_desired_y) <= 0 or numpy.linalg.det(C_desired_z) <= 0:
     print('unfeasible matrix!')
@@ -71,20 +81,20 @@ constraint, constraint_f = calculate_minimum_strain_energy(C_desired_z[0, 0], C_
 constraints.append(constraint)
 constraints_f.append(constraint_f)
 
-for i in range(1):
-    constraint, constraint_f = calculate_strain_energy(C_desired_y[0, 0], C_desired_y[1, 0], C_desired_y[1, 1], constraints_f[0][5] - 1 + 0.2 * i, 1)
+for i in range(10):
+    constraint, constraint_f = calculate_strain_energy(C_desired_y[0, 0], C_desired_y[1, 0], C_desired_y[1, 1], constraints_f[0][5] - 2 + 0.4 * i, 1)
     constraints.append(constraint)
     constraints_f.append(constraint_f)
 
-    constraint, constraint_f = calculate_strain_energy(C_desired_z[0, 0], C_desired_z[1, 0], C_desired_z[1, 1], constraints_f[1][4] - 1 + 0.2 * i, 0)
+    constraint, constraint_f = calculate_strain_energy(C_desired_z[0, 0], C_desired_z[1, 0], C_desired_z[1, 1], constraints_f[1][4] - 2 + 0.4 * i, 0)
     constraints.append(constraint)
     constraints_f.append(constraint_f)
 
-    constraint, constraint_f = calculate_strain_energy(C_desired_y[0, 0], C_desired_y[1, 0], C_desired_y[1, 1], constraints_f[0][5] + 1 - 0.2 * i, 1)
+    constraint, constraint_f = calculate_strain_energy(C_desired_y[0, 0], C_desired_y[1, 0], C_desired_y[1, 1], constraints_f[0][5] + 2 - 0.4 * i, 1)
     constraints.append(constraint)
     constraints_f.append(constraint_f)
 
-    constraint, constraint_f = calculate_strain_energy(C_desired_z[0, 0], C_desired_z[1, 0], C_desired_z[1, 1], constraints_f[1][4] + 1 - 0.2 * i, 0)
+    constraint, constraint_f = calculate_strain_energy(C_desired_z[0, 0], C_desired_z[1, 0], C_desired_z[1, 1], constraints_f[1][4] + 2 - 0.4 * i, 0)
     constraints.append(constraint)
     constraints_f.append(constraint_f)
 

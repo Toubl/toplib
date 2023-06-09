@@ -8,7 +8,6 @@ import scipy.sparse
 import scipy.sparse.linalg
 import cvxopt
 import cvxopt.cholmod
-from multiprocessing import Process, Manager
 
 from .boundary_conditions import BoundaryConditions
 from .utils import deleterowcol
@@ -65,6 +64,7 @@ class Problem(abc.ABC):
         dofs = numpy.arange(self.ndof)
         self.fixed = bc.fixed_nodes
         self.free = numpy.setdiff1d(dofs, self.fixed)
+        self.passive = 0
 
         # RHS and Solution vectors
         self.f = bc.forces
@@ -712,8 +712,19 @@ class ElasticityProblem(Problem):
 
         """
         # Setup and solve FE problem
-        self.Emin = 1e-9
+        passive_backup = self.passive
+        xPhys_backup = xPhys.copy()
+
+        self.passive = scipy.sparse.csr_matrix(xPhys < 1e-3)
+        xPhys[self.passive.indices] = 0
+
         K = self.build_K(xPhys)
+
+
+        max_abs_values = numpy.max(np.abs(K), axis=0)
+        s = max_abs_values == 0
+        s = s.indices
+        K = deleterowcol(K.tocsc(), s, s).tocoo()
         l = K.shape[0]
         K = cvxopt.spmatrix(
             K.data, K.row.astype(int), K.col.astype(int))
@@ -723,7 +734,23 @@ class ElasticityProblem(Problem):
         F[:2] = self.f[:2, 0]
 
         F = cvxopt.matrix(F)
-        cvxopt.cholmod.linsolve(K, F)  # F stores solution after solve
+        try:
+            cvxopt.cholmod.linsolve(K, F)  # F stores solution after solve
+            for ind in range(len(s)):
+                F = numpy.insert(F, s[ind], 0)
+        except:
+            self.Emin = 1e-9
+            self.passive = passive_backup
+            K = self.build_K(xPhys_backup)
+            l = K.shape[0]
+            K = cvxopt.spmatrix(
+                K.data, K.row.astype(int), K.col.astype(int))
+            # Solve system
+            F = numpy.zeros(l)
+            F[:2] = self.f[:2, 0]
+            F = cvxopt.matrix(F)
+            cvxopt.cholmod.linsolve(K, F)  # F stores solution after solve
+            self.Emin = 0
 
         zeros_to_insert = numpy.zeros(len(self.fixed))  # Create an array of zeros
         F = numpy.insert(F, 2, zeros_to_insert)  # Insert zeros of fixed dofs
@@ -755,9 +782,11 @@ class ElasticityProblem(Problem):
 
         """
         # Setup and solve FE problem
-        self.Emin = 1e-9
-        # self.passive = scipy.sparse.csr_matrix(xPhys < 1e-3)
-        # xPhys[self.passive.indices] = 0
+        passive_backup = self.passive
+        xPhys_backup = xPhys.copy()
+
+        self.passive = scipy.sparse.csr_matrix(xPhys < 1e-7)
+        xPhys[self.passive.indices] = 0
         K, K_y, K_z, fixed_y, fixed_z = self.build_K3(xPhys)
         if type(K) is not int:
             max_abs_values = numpy.max(np.abs(K), axis=0)
@@ -795,13 +824,25 @@ class ElasticityProblem(Problem):
                 f = f[[0, 1, 2, 4, 5]]
                 F[0:5] = f  # Force vector of reduced problem
                 F = cvxopt.matrix(F)
-                cvxopt.cholmod.linsolve(K_y, F)
+                try:
+                    cvxopt.cholmod.linsolve(K_y, F)
+                    for ind in range(len(r)):
+                        F = numpy.insert(F, r[ind], 0)
+                except:
+                    self.Emin = 1e-9
+                    K, K_y, K_z, fixed_y, fixed_z = self.build_K3(xPhys_backup)
+                    self.passive = passive_backup
+                    L_y = K_y.shape[0]
+                    K_y = cvxopt.spmatrix(
+                        K_y.data, K_y.row.astype(int), K_y.col.astype(int))
+                    F = numpy.zeros(L_y)
+                    f = self.f[0:6, i] / 2
+                    f = f[[0, 1, 2, 4, 5]]
+                    F[0:5] = f  # Force vector of reduced problem
+                    F = cvxopt.matrix(F)
+                    cvxopt.cholmod.linsolve(K_y, F)
+                    self.Emin = 0
 
-
-                for ind in range(len(r)):
-                    F = numpy.insert(F, r[ind], 0)
-
-                # F = numpy.insert(F, 2, 0)
                 F = numpy.insert(F, 3, 0)
 
                 for ind in range(len(fixed_y)):
@@ -817,12 +858,25 @@ class ElasticityProblem(Problem):
                 f = f[[0, 1, 2, 4, 5]]
                 F[0:5] = f  # Force vector of reduced problem
                 F = cvxopt.matrix(F)
-                cvxopt.cholmod.linsolve(K_z, F)
+                try:
+                    cvxopt.cholmod.linsolve(K_z, F)
+                    for ind in range(len(s)):
+                        F = numpy.insert(F, s[ind], 0)
+                except:
+                    self.Emin = 1e-9
+                    K, K_y, K_z, fixed_y, fixed_z = self.build_K3(xPhys_backup)
+                    self.passive = passive_backup
+                    L_z = K_z.shape[0]
+                    K_z = cvxopt.spmatrix(
+                        K_z.data, K_z.row.astype(int), K_z.col.astype(int))
+                    F = numpy.zeros(L_z)
+                    f = self.f[0:6, i] / 2
+                    f = f[[0, 1, 2, 4, 5]]
+                    F[0:5] = f  # Force vector of reduced problem
+                    F = cvxopt.matrix(F)
+                    cvxopt.cholmod.linsolve(K_z, F)
+                    self.Emin = 0
 
-                for ind in range(len(s)):
-                    F = numpy.insert(F, s[ind], 0)
-
-                # F = numpy.insert(F, 1, 0)
                 F = numpy.insert(F, 3, 0)
 
                 for ind in range(len(fixed_z)):
@@ -836,10 +890,22 @@ class ElasticityProblem(Problem):
                 F = numpy.zeros(L)
                 F[0:6] = self.f[0:6, i]  # Force vector of reduced problem
                 F = cvxopt.matrix(F)
-                cvxopt.cholmod.linsolve(K, F)
-
-                for ind in range(len(t)):
-                    F = numpy.insert(F, t[ind], 0)
+                try:
+                    cvxopt.cholmod.linsolve(K, F)
+                    for ind in range(len(t)):
+                        F = numpy.insert(F, t[ind], 0)
+                except:
+                    self.Emin = 1e-9
+                    K, K_y, K_z, fixed_y, fixed_z = self.build_K3(xPhys_backup)
+                    self.passive = passive_backup
+                    L = K.shape[0]
+                    K = cvxopt.spmatrix(
+                        K.data, K.row.astype(int), K.col.astype(int))
+                    F = numpy.zeros(L)
+                    F[0:6] = self.f[0:6, i]  # Force vector of reduced problem
+                    F = cvxopt.matrix(F)
+                    cvxopt.cholmod.linsolve(K, F)
+                    self.Emin = 0
 
                 for ind in range(len(self.fixed)):
                     F = numpy.insert(F, (self.fixed[ind] + 6), 0)

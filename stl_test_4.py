@@ -22,24 +22,24 @@ def add_buffer(volume, buffer_size):
     buffer[buffer_size:-buffer_size, buffer_size:-buffer_size, buffer_size:-buffer_size] = volume
     return buffer
 
-voxel_grid = np.loadtxt('x_opt_20_10_10.txt')
-volume = voxel_grid.reshape((20, 10, 10))
+voxel_grid = np.loadtxt('x_opt_40_15_15.txt')
+volume = voxel_grid.reshape((40, 15, 15))
 print(volume.min(), volume.max())
 
 # Refine the voxel grid
 refined_volume = refine_grid(volume, 10)
 
 # Add a buffer around the refined volume
-buffered_volume = add_buffer(refined_volume, buffer_size=3)  # adjust the buffer size as needed
+buffered_volume = add_buffer(refined_volume, buffer_size=4)  # adjust the buffer size as needed
 
 # Apply marching cubes to the refined volume
 verts, faces, normals, values = measure.marching_cubes(refined_volume, level=0.5)
 save_as_stl(verts, faces, 'STL_files/initial.stl')  # Save the initial object as STL
 
 # Apply a Gaussian filter to the buffered volume
-volume_smooth = gaussian_filter(buffered_volume, sigma=2.6)
+volume_smooth = gaussian_filter(buffered_volume, sigma=6.1)
 print(volume_smooth.min(), volume_smooth.max())
 
 # Apply marching cubes to the smoothed volume
 verts_smooth, faces_smooth, normals_smooth, values_smooth = measure.marching_cubes(volume_smooth, level=0.5)
-save_as_stl(verts_smooth, faces_smooth, 'STL_files/outer_shell_added.stl')  # Save the smoothed object as STL
+save_as_stl(verts_smooth, faces_smooth, 'STL_files/outer_shell_added_large.stl')  # Save the smoothed object as STL

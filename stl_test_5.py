@@ -2,6 +2,15 @@ import numpy as np
 from skimage import measure
 from scipy.ndimage import gaussian_filter
 from stl import mesh
+from mpl_toolkits.mplot3d import Axes3D, art3d
+import matplotlib.pyplot as plt
+from stl import mesh
+from mpl_toolkits import mplot3d
+
+
+
+
+
 
 def save_as_stl(verts, faces, filename):
     my_mesh = mesh.Mesh(np.zeros(faces.shape[0], dtype=mesh.Mesh.dtype))
@@ -50,7 +59,7 @@ voxel_grid = np.loadtxt('x_opt_20_10_10.txt')
 volume = voxel_grid.reshape((20, 10, 10))
 
 # Refine the voxel grid
-refined_volume = refine_grid(volume, 6)
+refined_volume = refine_grid(volume, 14)
 
 # Add a buffer around the refined volume
 buffered_volume = add_buffer(refined_volume, buffer_size=3)  # adjust the buffer size as needed
@@ -60,7 +69,7 @@ verts, faces, normals, values = measure.marching_cubes(refined_volume, level=0.5
 save_as_stl(verts, faces, 'STL_files/initial.stl')  # Save the initial object as STL
 
 # Apply a Gaussian filter to the inner part of the buffered volume
-volume_smooth, outer_shell = apply_inner_gaussian_filter(buffered_volume, sigma=2.2, shell_thickness=4)
+volume_smooth, outer_shell = apply_inner_gaussian_filter(buffered_volume, sigma=6.2, shell_thickness=4)
 
 # Apply final Gaussian filter to the combined volume
 sigma_final = 1.0  # You can adjust this value
@@ -69,3 +78,5 @@ final_volume_smooth = gaussian_filter(volume_smooth, sigma_final)
 # Apply marching cubes to the final smoothed volume
 verts_smooth, faces_smooth, normals_smooth, values_smooth = measure.marching_cubes(final_volume_smooth, level=0.5)
 save_as_stl(verts_smooth, faces_smooth, 'STL_files/smooth_final.stl')  # Save the final smoothed
+
+# show_stl_plotly('STL_files/smooth_final.stl')

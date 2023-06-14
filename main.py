@@ -6,6 +6,7 @@ from topopt.solvers import TopOptSolver
 from topopt.filters import DensityBasedFilter
 from topopt.guis import GUI
 from topopt.utils import read_json_file
+import h5py
 
 # this is a test to push my branch
 
@@ -30,6 +31,7 @@ print("rmin:    ", rmin)
 
 # Initial solution
 x = volfrac * numpy.ones(nely * nelx, dtype=float)
+print(x)
 
 # Boundary conditions defining the loads and fixed points
 bc = MBBBeamBoundaryConditions(nelx, nely)
@@ -44,3 +46,14 @@ x_opt = solver.optimize(x)
 print(x_opt)
 
 input("Press enter...")
+
+
+# Save
+with h5py.File('data.h5', 'w') as hf:
+    hf.create_dataset("data",  data=x_opt)
+    hf.attrs['metadata'] = str(nelx)
+
+# # Load
+# with h5py.File('data.h5', 'r') as hf:
+#     data = hf['data'][:]
+#     metadata = eval(hf.attrs['metadata'])

@@ -230,7 +230,7 @@ class DensityBasedFilter(Filter):
 
         """
         dobj[:] = numpy.asarray(
-            self.H * (dobj[numpy.newaxis].T / self.Hs))[:, 0]
+            self.H * dobj[numpy.newaxis].T / self.Hs)[:, 0]
 
     def filter_volume_sensitivities(
             self, xPhys: numpy.ndarray, dv: numpy.ndarray) -> None:
@@ -245,4 +245,4 @@ class DensityBasedFilter(Filter):
             The filtered volume sensitivities to be computed.
 
         """
-        dv[:] = numpy.asarray(self.H * (dv[numpy.newaxis].T / self.Hs))[:, 0]
+        dv[:] = numpy.asarray(self.H * dv[numpy.newaxis].T / self.Hs)[:, 0]

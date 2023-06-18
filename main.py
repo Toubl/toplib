@@ -1,7 +1,7 @@
 import pyfiglet
 import numpy
 from topopt.boundary_conditions import FixedBeamBoundaryConditions
-from topopt.problems import ComplianceProblem
+from topopt.problems import ComplianceProblem3
 from topopt.solvers import TopOptSolver
 from topopt.solvers import OCSolver
 from topopt.filters import DensityBasedFilter
@@ -27,13 +27,12 @@ def read_array_from_file(file_path):
 
 
 nelx, nely, nelz = 40, 10, 10
-# nelx, nely, nelz = 160, 80, 1  # Number of elements in the x y and z-direction
 volfrac = 0.2  # Volume fraction for constraints
 penal = 3  # Penalty for SIMP
 rmin = 2
 # Initial solution
-x = volfrac * numpy.ones(nely * nelx * nelz, dtype=float)
-file_path = 'x_opt.txt'  # Replace with the actual file path
+x = volfrac * numpy.ones(nely * nelx * nelz, dtype=float)                        
+file_path = 'x_opt.txt'
 # x = read_array_from_file(file_path)
 
 # Boundary conditions defining the loads and fixed points
@@ -41,34 +40,29 @@ bc = FixedBeamBoundaryConditions(nelx, nely, nelz)
 
 # define force vector
 F = numpy.zeros((6, 1))
-# 3D-Example
 F[1, 0] = 1  # 0: F_x, 1: F_y, 2: F_z, 3: M_x, 4: M_y, 5: M_z || 0: F_y, 1: M_z (2D)
-F[5, 0] = -0.5
-# 2D-Example
-# F[0, 0] = 1
-# F[1, 0] = -0.5
+# F[5, 0] = -0.5
+# F[2, 1] = 1
+# F[4, 1] = 0.5
+# F[0, 1] = 5
 
 bc.set_forces(F)
 
 constraints = []
 constraints_f = []
 
-# Problem to optimize given objective and constraints
-problem = ComplianceProblem(bc, penal)
-
-gui = GUI(problem, "Topology Optimization Example")
 topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
-solver = TopOptSolver(problem, volfrac, topopt_filter, gui, constraints, constraints_f)
+
+# Problem to optimize given objective and constraints
+problem = ComplianceProblem3(bc, penal, volfrac, topopt_filter, constraints, constraints_f, 0)
+problem.reducedofs = 1
+solver = TopOptSolver(problem, len(constraints))
 x_opt = solver.optimize(x)
 with open(file_path, 'w') as file:
     for item in x_opt:
         file.write(str(item) + '\n')
 
-if nelz > 1:
-    problem.compute_reduced_stiffness3(solver.xPhys)
-    problem.compute_reduced_stiffness3(x_opt)
-else:
-    problem.compute_reduced_stiffness(x_opt)
+problem.compute_reduced_stiffness(x_opt)
 
 tol = 0.1
 x_to_stl(nelx, nely, nelz, tol, x_opt, 'output.stl')

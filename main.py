@@ -5,8 +5,10 @@ from topopt.problems import ComplianceProblem
 from topopt.solvers import TopOptSolver
 from topopt.filters import DensityBasedFilter
 from topopt.guis import GUI
+# from topopt.xdmf_writer import XDMFWriter
 from topopt.utils import read_json_file
 import h5py
+from topopt.postprocessor import Postprocessor
 
 # this is a test to push my branch
 
@@ -43,17 +45,20 @@ gui = GUI(problem, "Topology Optimization Example")
 topopt_filter = DensityBasedFilter(nelx, nely, rmin)
 solver = TopOptSolver(problem, volfrac, topopt_filter, gui)
 x_opt = solver.optimize(x)
+x_opt = x_opt.reshape((nelx, nely))
+print(x_opt)
+# converting 2D matrix to 3D tensor
+x_opt = numpy.expand_dims(x_opt, axis=2)
+x_opt = numpy.repeat(x_opt, 10, axis=2)
+x_opt = numpy.flip(numpy.transpose(x_opt, (0, 2, 1)), axis=2)
+
 print(x_opt)
 
+
+# Save the tensor to a text file, with elements separated by spaces
+numpy.savetxt('tensor.txt', x_opt.flatten(), fmt='%d')
+
+postprocessor = Postprocessor(x_opt)
+postprocessor.process(2, 3, 1.0, 3, 2, 'initial.stl', 'final.stl')
 input("Press enter...")
 
-
-# Save
-with h5py.File('data.h5', 'w') as hf:
-    hf.create_dataset("data",  data=x_opt)
-    hf.attrs['metadata'] = str(nelx)
-
-# # Load
-# with h5py.File('data.h5', 'r') as hf:
-#     data = hf['data'][:]
-#     metadata = eval(hf.attrs['metadata'])

@@ -7,16 +7,16 @@ from stl import mesh
 class Postprocessor:
     """Postprocessor for topology optimization results."""
 
-    def __init__(self, filepath):
+    def __init__(self, volume):
         """
-        Initialize the Postprocessor with a voxel grid file.
+        Initialize the Postprocessor with a voxel grid.
 
         Parameters
         ----------
-        filepath : str
-            Path to the voxel grid file.
+        volume : ndarray
+            3D array of the voxel grid.
         """
-        self.volume = self.load_and_reshape_grid(filepath)
+        self.volume = volume
         
     def load_and_reshape_grid(self, filepath, shape=(20, 10, 10)):
         """
@@ -140,7 +140,7 @@ class Postprocessor:
 
         return combined_volume, outer_shell
 
-    def process(self, refinement_factor, buffer_size, inner_gaussian_sigma, shell_thickness, final_gaussian_sigma):
+    def process(self, refinement_factor, buffer_size, inner_gaussian_sigma, shell_thickness, final_gaussian_sigma, initial_filename, final_filename):
         """
         Process the voxel grid.
 
@@ -156,6 +156,10 @@ class Postprocessor:
             Thickness of the shell to exclude from the filtering.
         final_gaussian_sigma : float
             Standard deviation for the final Gaussian filter.
+        initial_filename : str
+            Path to the output STL file for the initial object.
+        final_filename : str
+            Path to the output STL file for the final smoothed volume.
 
         """
         # Refine the voxel grid
@@ -164,9 +168,12 @@ class Postprocessor:
         # Add a buffer around the refined volume
         buffered_volume = self.add_buffer(refined_volume, buffer_size)
 
+        # Set the threshold level to be the midpoint of min and max of volume data
+        level = (np.min(refined_volume) + np.max(refined_volume)) / 2
+
         # Apply marching cubes to the refined volume
-        verts, faces, normals, values = measure.marching_cubes(refined_volume, level=0.5)
-        self.save_as_stl(verts, faces, 'STL_files/initial.stl')  # Save the initial object as STL
+        verts, faces, normals, values = measure.marching_cubes(refined_volume, level=level)
+        self.save_as_stl(verts, faces, initial_filename)  # Save the initial object as STL
 
         # Apply a Gaussian filter to the inner part of the buffered volume
         volume_smooth, outer_shell = self.apply_inner_gaussian_filter(buffered_volume, inner_gaussian_sigma, shell_thickness)
@@ -174,6 +181,9 @@ class Postprocessor:
         # Apply final Gaussian filter to the combined volume
         final_volume_smooth = gaussian_filter(volume_smooth, final_gaussian_sigma)
 
+        # Set the threshold level to be the midpoint of min and max of smoothed volume data
+        level_smooth = (np.min(final_volume_smooth) + np.max(final_volume_smooth)) / 2
+
         # Apply marching cubes to the final smoothed volume
-        verts_smooth, faces_smooth, normals_smooth, values_smooth = measure.marching_cubes(final_volume_smooth, level=0.5)
-        self.save_as_stl(verts_smooth, faces_smooth, 'STL_files/smooth_final.stl')  # Save the final smoothed volume
+        verts_smooth, faces_smooth, normals_smooth, values_smooth = measure.marching_cubes(final_volume_smooth, level=level_smooth)
+        self.save_as_stl(verts_smooth, faces_smooth, final_filename)  # Save the final smoothed volume

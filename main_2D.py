@@ -7,7 +7,7 @@ from topopt.solvers import OCSolver
 from topopt.filters import DensityBasedFilter
 from topopt.guis import GUI
 from voxel import x_to_stl
-
+import time
 
 title = pyfiglet.figlet_format("TopOpt", font="small", width=100)
 with open('utils/ascii_ose.txt') as f:
@@ -26,7 +26,7 @@ def read_array_from_file(file_path):
     return numpy.array(array).astype(numpy.float64)
 
 
-nelx, nely, nelz = 320, 80, 1  # Number of elements in the x y and z-direction
+nelx, nely, nelz = 100, 50, 1  # Number of elements in the x y and z-direction
 volfrac = 0.2  # Volume fraction for constraints
 penal = 3  # Penalty for SIMP
 rmin = 2
@@ -39,10 +39,10 @@ file_path = 'x_opt.txt'  # Replace with the actual file path
 bc = FixedBeamBoundaryConditions(nelx, nely, nelz)
 
 # define force vector
-F = numpy.zeros((6, 1))
+F = numpy.zeros((6, 2))
 # 2D-Example
 F[0, 0] = 1  # 0: F_y, 1: M_z
-# F[1, 0] = -0.5
+F[1, 1] = -0.5
 
 bc.set_forces(F)
 bc.set_forces(F)
@@ -50,11 +50,11 @@ bc.set_forces(F)
 constraints = []
 constraints_f = []
 
-gui = GUI(bc, "Topology Optimization Example")
+# gui = GUI(bc, "Topology Optimization Example")
 topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 
 # Problem to optimize given objective and constraints
-problem = ComplianceProblem2(bc, penal, volfrac, topopt_filter, constraints, constraints_f, gui)
+problem = ComplianceProblem2(bc, penal, volfrac, topopt_filter, constraints, constraints_f, 0)
 problem.reducedofs = 1
 solver = TopOptSolver(problem, len(constraints))
 x_opt = solver.optimize(x)

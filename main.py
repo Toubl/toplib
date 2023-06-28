@@ -7,6 +7,8 @@ from topopt.solvers import OCSolver
 from topopt.filters import DensityBasedFilter
 from topopt.guis import GUI
 from voxel import x_to_stl
+import time
+import matlab.engine
 
 
 title = pyfiglet.figlet_format("TopOpt", font="small", width=100)
@@ -25,8 +27,7 @@ def read_array_from_file(file_path):
             array.append(entry)
     return numpy.array(array).astype(numpy.float64)
 
-
-nelx, nely, nelz = 40, 10, 10
+nelx, nely, nelz = 40, 20, 20
 volfrac = 0.2  # Volume fraction for constraints
 penal = 3  # Penalty for SIMP
 rmin = 2
@@ -63,6 +64,6 @@ with open(file_path, 'w') as file:
         file.write(str(item) + '\n')
 
 problem.compute_reduced_stiffness(x_opt)
-
+problem.eng.quit()
 tol = 0.1
 x_to_stl(nelx, nely, nelz, tol, x_opt, 'output.stl')

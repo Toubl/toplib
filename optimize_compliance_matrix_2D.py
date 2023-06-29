@@ -34,7 +34,7 @@ def read_array_from_file(file_path):
 nelx, nely, nelz = 160, 80, 1  # Number of elements in the x y and z-direction
 volfrac = 1  # Volume fraction for constraints
 penal = 3  # Penalty for SIMP
-rmin = 4  # Filter radius
+rmin = 3  # Filter radius
 
 # Initial solution
 x = volfrac * numpy.ones(nely * nelx * nelz, dtype=float)
@@ -49,33 +49,41 @@ F = numpy.zeros((6, 1))
 F[1, 0] = 1  # 0: F_x, 1: F_y, 2: F_z, 3: M_x, 4: M_y, 5: M_z
 bc.set_forces(F)
 
-a = 400
-b = -400
-c = 800
+# Define desired 4x4 stiffness matrix
+# K_11 = ...
+# K_22 = ...
+# K_44 = ...
+# K_33 = K_11
+# K_43 = -(K_11 - K_22 + K_44)/2
+#
+# K = numpy.array([[K_33, K_43], [K_43, K_44]])
+#
+# C_desired_y = numpy.linalg.inv(K)
 
-change = 1
-change_x = (change - 1) * b ** 2 / (4 * a)
-a = a * change
-b = b * change
-c = c + change_x
+# Directly define desired Compliance matrix
+c_33 = 300
+c_43 = 300
+c_44 = 600
 
-C_desired_y = numpy.array([[c, b / 2], [b / 2, a]])
+C_desired_y = numpy.array([[c_33, c_43], [c_43, c_44]])
 
+# Check if matrix is feasible. Compliance and Stiffness matrices must be positive definite
 if numpy.linalg.det(C_desired_y) <= 0:
     print('unfeasible matrix!')
     exit(1)
 
+# values and load cases of constraints in list
 constraints = []
 constraints_f = []
 
-
+# calculate constraints to satisfy desired compliance matrix
 constraint, constraint_f = calculate_minimum_strain_energy(C_desired_y[0, 0], C_desired_y[1, 0], C_desired_y[1, 1], 1)
 constraints.append(constraint)
 constraints_f.append(constraint_f)
 
-steps = 10
+steps = 4
 for i in range(steps):
-    numbers = numpy.linspace(-10, 10, num=steps)
+    numbers = numpy.linspace(-4, 4, num=steps)
     constraint, constraint_f = calculate_strain_energy(C_desired_y[0, 0], C_desired_y[1, 0], C_desired_y[1, 1], constraints_f[0][1] + numbers[i], 1)
     constraints.append(constraint)
     constraints_f.append(constraint_f)
@@ -85,14 +93,17 @@ topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 gui = GUI(bc, "Topology Optimization Example")
 problem = MinMassProblem2(bc, penal, volfrac, topopt_filter, constraints, constraints_f, gui)
 problem.C_desired_y = C_desired_y
-problem.reducedofs = 0
+problem.reducedofs = 1  # delete dofs of elements that are close to zero in density, speeding up optimization
 solver = TopOptSolver(problem, len(constraints))
 
 x_opt = solver.optimize(x)
+
+# Calculate and display Compliance and stiffness matrix of reduced system
 _, C_red = problem.compute_reduced_stiffness(problem.xPhys)
+# display optimized topology
 x_to_stl(nelx, nely, nelz, 0.1, x_opt, 'output.stl')
 
-
+# save optimized density values to txt file
 with open(file_path, 'w') as file:
     for item in x_opt:
         file.write(str(item) + '\n')

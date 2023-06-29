@@ -45,27 +45,35 @@ F = numpy.zeros((6, 1))
 F[1, 0] = 1  # 0: F_x, 1: F_y, 2: F_z, 3: M_x, 4: M_y, 5: M_z
 bc.set_forces(F)
 
-a = 3000
-b = 3000
-c = 825
+# Define desired 4x4 stiffness matrix
+# K_11 = ...
+# K_22 = ...
+# K_44 = ...
+# K_33 = K_11
+# K_43 = -(K_11 - K_22 + K_44)/2
+#
+# K = numpy.array([[K_33, K_43], [K_43, K_44]])
+#
+# C_desired_y = numpy.linalg.inv(K)
 
-change = 1
-change_x = (change - 1) * b ** 2 / (4 * a)
-a = a * change
-b = b * change
-c = c + change_x
+# Directly define desired Compliance matrix
+c_33 = 300
+c_43 = 300
+c_44 = 600
 
-C_desired_y = numpy.array([[c, b / 2], [b / 2, a]])
-C_desired_z = numpy.array([[c, -b / 2], [-b / 2, a]])
+C_desired_y = numpy.array([[c_33, c_43], [c_43, c_44]])
+C_desired_z = numpy.array([[c_33, -c_43], [-c_43, c_44]])
 
 if numpy.linalg.det(C_desired_y) <= 0 or numpy.linalg.det(C_desired_z) <= 0:
     print('unfeasible matrix!')
     exit(1)
+
+# values and load cases of constraints in list
 constraints = []
 constraints_f = []
 
 
-
+# calculate constraints to satisfy desired compliance matrix
 constraint, constraint_f = calculate_minimum_strain_energy(C_desired_y[0, 0], C_desired_y[1, 0], C_desired_y[1, 1], 1)
 constraints.append(constraint)
 constraints_f.append(constraint_f)
@@ -88,9 +96,17 @@ topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 problem = MinMassProblem3(bc, penal, volfrac, topopt_filter, constraints, constraints_f, 0)
 problem.C_desired_y = C_desired_y
 problem.C_desired_z = C_desired_z
-problem.reducedofs = 1
+problem.reducedofs = 1  # delete dofs of elements that are close to zero in density, speeding up optimization
 solver = TopOptSolver(problem, len(constraints))
 
 x_opt = solver.optimize(x)
+
+# Calculate and display Compliance and stiffness matrix of reduced system
 _, C_red = problem.compute_reduced_stiffness(problem.xPhys)
+# display optimized topology
 x_to_stl(nelx, nely, nelz, 0.1, x_opt, 'output.stl')
+
+# save optimized density values to txt file
+with open(file_path, 'w') as file:
+    for item in x_opt:
+        file.write(str(item) + '\n')

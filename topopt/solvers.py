@@ -13,11 +13,6 @@ import nlopt
 
 from topopt.problems import Problem
 
-from topopt.guis import GUI
-import time
-import scipy.sparse
-
-
 class TopOptSolver:
     """Solver for topology optimization problems using NLopt's MMA solver."""
 
@@ -56,7 +51,7 @@ class TopOptSolver:
         self.ftol_rel = ftol_rel
         self.xtol_rel = ftol_rel
 
-
+        # setting objective and constraints function(s)
         if (n_constraints == 0):
             self.opt.set_min_objective(self.problem.objective_function)
             self.opt.add_inequality_mconstraint(self.problem.constraints_function, numpy.zeros(1))

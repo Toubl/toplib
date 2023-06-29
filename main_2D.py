@@ -3,7 +3,6 @@ import numpy
 from topopt.boundary_conditions import FixedBeamBoundaryConditions
 from topopt.problems import ComplianceProblem2
 from topopt.solvers import TopOptSolver
-from topopt.solvers import OCSolver
 from topopt.filters import DensityBasedFilter
 from topopt.guis import GUI
 from voxel import x_to_stl
@@ -39,14 +38,15 @@ file_path = 'x_opt.txt'  # Replace with the actual file path
 bc = FixedBeamBoundaryConditions(nelx, nely, nelz)
 
 # define force vector
-F = numpy.zeros((6, 1))
+F = numpy.zeros((6, 2))
 # 2D-Example
 F[0, 0] = 1  # 0: F_y, 1: M_z
-# F[1, 0] = -0.5
+F[1, 1] = 0.5
 
 bc.set_forces(F)
-bc.set_forces(F)
 
+# values and load cases of constraints in list
+# stays empty for Compliance optimization
 constraints = []
 constraints_f = []
 
@@ -55,14 +55,17 @@ topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 
 # Problem to optimize given objective and constraints
 problem = ComplianceProblem2(bc, penal, volfrac, topopt_filter, constraints, constraints_f, gui)
-problem.reducedofs = 1
+problem.reducedofs = 1  # delete dofs of elements that are close to zero in density, speeding up optimization
 solver = TopOptSolver(problem, len(constraints))
+
 x_opt = solver.optimize(x)
+
+# Calculate and display Compliance and stiffness matrix of reduced system
+_, C_red = problem.compute_reduced_stiffness(problem.xPhys)
+# display optimized topology
+x_to_stl(nelx, nely, nelz, 0.1, x_opt, 'output.stl')
+
+# save optimized density values to txt file
 with open(file_path, 'w') as file:
     for item in x_opt:
         file.write(str(item) + '\n')
-
-problem.compute_reduced_stiffness(problem.xPhys)
-
-tol = 0.1
-x_to_stl(nelx, nely, nelz, tol, x_opt, 'output.stl')

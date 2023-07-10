@@ -15,6 +15,8 @@ from topopt.filters import Filter
 from topopt.filters import DensityBasedFilter
 
 import time
+import os
+
 
 class Problem(abc.ABC):
     """
@@ -303,6 +305,7 @@ class ElasticityProblem2(Problem):
             0.5 - nu / 6., 0.125 + nu / 8., -0.25 - nu / 12.,
             -0.125 + 0.375 * nu, -0.25 + nu / 12., -0.125 - nu / 8., nu / 6.,
             0.125 - 0.375 * nu])
+
         KE = E / (1 - nu ** 2) * numpy.array([
             [k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]],
             [k[1], k[0], k[7], k[6], k[5], k[4], k[3], k[2]],
@@ -803,7 +806,6 @@ class ElasticityProblem3(Problem):
     def lk(E: float = 1, nu: float = 0.3, length_x: float = 1.0, length_y: float = 1.0,
            length_z: float = 1.0) -> numpy.ndarray:
         # Compute 3D constitutive matrix (linear continuum mechanics)
-
         C = E / ((1 + nu) * (1 - 2 * nu)) * numpy.array([[1 - nu, nu, nu, 0, 0, 0],
                                                          [nu, 1 - nu, nu, 0, 0, 0],
                                                          [nu, nu, 1 - nu, 0, 0, 0],
@@ -897,14 +899,9 @@ class ElasticityProblem3(Problem):
             Transformed stiffness matrix with RBE2 interface.
         """
 
-        row, col, data = K.row, K.col, K.data
-        n = K.shape[0]
-
-        # Create COO Matrix expanded by dofs of master node
-        expanded_row = numpy.concatenate(([0, 1, 2, 3, 4, 5], row + 6))
-        expanded_col = numpy.concatenate(([0, 1, 2, 3, 4, 5], col + 6))
-        expanded_data = numpy.concatenate(([0, 0, 0, 0, 0, 0], data))
-        K_ = scipy.sparse.coo_matrix((expanded_data, (expanded_row, expanded_col)), shape=(n + 6, n + 6))
+        K = K.tocsr()
+        indptr = np.insert(K.indptr, 0, np.zeros(6))
+        K_ = scipy.sparse.csr_matrix((K.data, K.indices + 6, indptr), shape=(K.shape[0] + 6, K.shape[1] + 6))
 
         if hasattr(self, 'T_r') and case == 0:
             # Code to execute when self.T_r exists
@@ -982,43 +979,44 @@ class ElasticityProblem3(Problem):
 
 
         # Perform same steps for case of pure bending in xy-plane (exploiting symmetry of problem)
-        nodenrs = numpy.reshape(numpy.arange(1, (1 + self.nelx) * (1 + self.nely) * (1 + int(self.nelz/2)) + 1, dtype=numpy.int32),
-                             (1 + self.nely, 1 + int(self.nelz/2), 1 + self.nelx), order='F')  # nodes numbering             #3D#
-        edofVec = numpy.reshape(3 * nodenrs[0:self.nely, 0:int(self.nelz/2), 0:self.nelx] + 1, (int(self.nel/2), 1), order='F')  # #3D#
+        if self.nelz > 1:
+            nodenrs = numpy.reshape(numpy.arange(1, (1 + self.nelx) * (1 + self.nely) * (1 + int(self.nelz/2)) + 1, dtype=numpy.int32),
+                                 (1 + self.nely, 1 + int(self.nelz/2), 1 + self.nelx), order='F')  # nodes numbering             #3D#
+            edofVec = numpy.reshape(3 * nodenrs[0:self.nely, 0:int(self.nelz/2), 0:self.nelx] + 1, (int(self.nel/2), 1), order='F')  # #3D#
 
-        a = 3 * (self.nely + 1) * (int(self.nelz/2) + 1)
-        b = 3 * (self.nely + 1)
-        c = 3 * (self.nely + 1) * (int(self.nelz/2) + 2)
-        d = 3 * (self.nely + 1)
-        edofMat = edofVec + numpy.array([0, 1, 2, a, a + 1, a + 2, a - 3, a - 2, a - 1, -3, -2, -1,
-                                      b, b + 1, b + 2, c, c + 1, c + 2, c - 3, c - 2, c - 1,
-                                      d - 3, d - 2, d - 1],
-                                     dtype=numpy.int32) - 1  # connectivity matrix         #3D#
-        # Construct the index pointers for the coo format
-        self.iK_y = numpy.kron(edofMat, numpy.ones((24, 1))).flatten()
-        self.jK_y = numpy.kron(edofMat, numpy.ones((1, 24))).flatten()
-
+            a = 3 * (self.nely + 1) * (int(self.nelz/2) + 1)
+            b = 3 * (self.nely + 1)
+            c = 3 * (self.nely + 1) * (int(self.nelz/2) + 2)
+            d = 3 * (self.nely + 1)
+            edofMat = edofVec + numpy.array([0, 1, 2, a, a + 1, a + 2, a - 3, a - 2, a - 1, -3, -2, -1,
+                                          b, b + 1, b + 2, c, c + 1, c + 2, c - 3, c - 2, c - 1,
+                                          d - 3, d - 2, d - 1],
+                                         dtype=numpy.int32) - 1  # connectivity matrix         #3D#
+            # Construct the index pointers for the coo format
+            self.iK_y = numpy.kron(edofMat, numpy.ones((24, 1))).flatten()
+            self.jK_y = numpy.kron(edofMat, numpy.ones((1, 24))).flatten()
 
         # Perform same steps for case of pure bending in xz-plane (exploiting symmetry of problem)
-        nodenrs = numpy.reshape(
-            numpy.arange(1, (1 + self.nelx) * (1 + int(self.nely/2)) * (1 + self.nelz) + 1,
-                         dtype=numpy.int32),
-            (1 + int(self.nely/2), 1 + self.nelz, 1 + self.nelx),
-            order='F')  # nodes numbering             #3D#
-        edofVec = numpy.reshape(3 * nodenrs[0:int(self.nely/2), 0:self.nelz, 0:self.nelx] + 1,
-                                (int(self.nel / 2), 1), order='F')  # #3D#
+        if self.nely > 1:
+            nodenrs = numpy.reshape(
+                numpy.arange(1, (1 + self.nelx) * (1 + int(self.nely/2)) * (1 + self.nelz) + 1,
+                             dtype=numpy.int32),
+                (1 + int(self.nely/2), 1 + self.nelz, 1 + self.nelx),
+                order='F')  # nodes numbering             #3D#
+            edofVec = numpy.reshape(3 * nodenrs[0:int(self.nely/2), 0:self.nelz, 0:self.nelx] + 1,
+                                    (int(self.nel / 2), 1), order='F')  # #3D#
 
-        a = 3 * (int(self.nely/2) + 1) * (self.nelz + 1)
-        b = 3 * (int(self.nely/2) + 1)
-        c = 3 * (int(self.nely/2) + 1) * (self.nelz + 2)
-        d = 3 * (int(self.nely/2) + 1)
-        edofMat = edofVec + numpy.array([0, 1, 2, a, a + 1, a + 2, a - 3, a - 2, a - 1, -3, -2, -1,
-                                         b, b + 1, b + 2, c, c + 1, c + 2, c - 3, c - 2, c - 1,
-                                         d - 3, d - 2, d - 1],
-                                        dtype=numpy.int32) - 1  # connectivity matrix         #3D#
-        # Construct the index pointers for the coo format
-        self.iK_z = numpy.kron(edofMat, numpy.ones((24, 1))).flatten()
-        self.jK_z = numpy.kron(edofMat, numpy.ones((1, 24))).flatten()
+            a = 3 * (int(self.nely/2) + 1) * (self.nelz + 1)
+            b = 3 * (int(self.nely/2) + 1)
+            c = 3 * (int(self.nely/2) + 1) * (self.nelz + 2)
+            d = 3 * (int(self.nely/2) + 1)
+            edofMat = edofVec + numpy.array([0, 1, 2, a, a + 1, a + 2, a - 3, a - 2, a - 1, -3, -2, -1,
+                                             b, b + 1, b + 2, c, c + 1, c + 2, c - 3, c - 2, c - 1,
+                                             d - 3, d - 2, d - 1],
+                                            dtype=numpy.int32) - 1  # connectivity matrix         #3D#
+            # Construct the index pointers for the coo format
+            self.iK_z = numpy.kron(edofMat, numpy.ones((24, 1))).flatten()
+            self.jK_z = numpy.kron(edofMat, numpy.ones((1, 24))).flatten()
 
     def compute_young_moduli(self, x: numpy.ndarray, dE: numpy.ndarray = None
                              ) -> numpy.ndarray:
@@ -1075,7 +1073,7 @@ class ElasticityProblem3(Problem):
         a_z = 1
         for i in range(self.nloads):
             # For case of pure bending in xy-plane (exploiting symmetry of problem)
-            if all(self.f[[0, 2, 3, 4], i] == ([0, 0, 0, 0])) and a_y:
+            if all(self.f[[0, 2, 3, 4], i] == ([0, 0, 0, 0])) and a_y and self.nelz > 1:
                 a_y = 0
                 xPhys_y = numpy.reshape(xPhys, (self.nelx, self.nelz, self.nely), order='C')
                 xPhys_y = xPhys_y[:, int(self.nelz / 2):, :]
@@ -1095,10 +1093,10 @@ class ElasticityProblem3(Problem):
                                     self.nely + 1) + 3 * f * (int(self.nelz / 2) + 1) * (self.nely + 1):3]
                         fixed_y = numpy.union1d(fixed_y, fixed2)
                     # + 6 is because 6 dofs of master node have been added
-                    K_y = deleterowcol(K_y.tocsc(), fixed_y + 6, fixed_y + 6).tocoo()
-                    K_y = deleterowcol(K_y.tocsc(), [3], [3]).tocoo()  # remove Torsion dof of master node (necessary)
+                    K_y = deleterowcol(K_y, fixed_y + 6, fixed_y + 6)
+                    K_y = deleterowcol(K_y, [3], [3])  # remove Torsion dof of master node (necessary)
             # For case of pure bending in xz-plane (exploiting symmetry of problem)
-            elif all(self.f[[0, 1, 3, 5], i] == ([0, 0, 0, 0])) and a_z:
+            elif all(self.f[[0, 1, 3, 5], i] == ([0, 0, 0, 0])) and a_z and self.nely > 1:
                 a_z = 0
                 xPhys_z = numpy.reshape(xPhys, (self.nelx, self.nelz, self.nely), order='C')
                 xPhys_z = xPhys_z[:, :, int(self.nely / 2):]
@@ -1116,8 +1114,8 @@ class ElasticityProblem3(Problem):
                     fixed2 = dofs[1:-1 - 3 * (self.nelz + 1) * (int(self.nely / 2) + 1):3 * (int(self.nely / 2) + 1)]
                     fixed_z = numpy.union1d(fixed_z, fixed2)
                     # + 6 is because 6 dofs of master node have been added
-                    K_z = deleterowcol(K_z.tocsc(), fixed_z + 6, fixed_z + 6).tocoo()
-                    K_z = deleterowcol(K_z.tocsc(), [3], [3]).tocoo()  # remove Torsion dof of master node (necessary)
+                    K_z = deleterowcol(K_z.tocsc(), fixed_z + 6, fixed_z + 6)
+                    K_z = deleterowcol(K_z.tocsc(), [3], [3])  # remove Torsion dof of master node (necessary)
             # For general case
             else:
                 sK = ((self.KE.flatten()[numpy.newaxis]).T *
@@ -1128,7 +1126,7 @@ class ElasticityProblem3(Problem):
 
                 if remove_constrained:
                     # Remove constrained dofs from matrix and convert to coo
-                    K = deleterowcol(K.tocsc(), self.fixed + 6, self.fixed + 6).tocoo()
+                    K = deleterowcol(K, self.fixed + 6, self.fixed + 6)
 
         return K, K_y, K_z, fixed_y, fixed_z
 
@@ -1176,17 +1174,17 @@ class ElasticityProblem3(Problem):
         # and converting to cvxopt
         # if K is still int, matrix has not been built and case does not have to be considered
         if type(K) is not int:
-            K = K.tocsr()
+            # K = K.tocsr()
             t = numpy.diff(K.indptr) == 0
             t = scipy.sparse.csr_matrix(t)
             t = t.indices
-            K = deleterowcol(K.tocsc(), t, t).tocoo()
+            K = deleterowcol(K, t, t).tocoo()
             L = K.shape[0]
             K = cvxopt.spmatrix(
                 K.data, K.row.astype(int), K.col.astype(int))
 
         if type(K_y) is not int:
-            K_y = K_y.tocsr()
+            # K_y = K_y.tocsr()
             r = numpy.diff(K_y.indptr) == 0
             r = scipy.sparse.csr_matrix(r)
             r = r.indices
@@ -1196,7 +1194,7 @@ class ElasticityProblem3(Problem):
                 K_y.data, K_y.row.astype(int), K_y.col.astype(int))
 
         if type(K_z) is not int:
-            K_z = K_z.tocsr()
+            # K_z = K_z.tocsr()
             s = numpy.diff(K_z.indptr) == 0
             s = scipy.sparse.csr_matrix(s)
             s = s.indices
@@ -1209,7 +1207,7 @@ class ElasticityProblem3(Problem):
 
         for i in range(self.nloads):
             # For case of pure bending in xy-plane (exploiting symmetry of problem)
-            if all(self.f[[0, 2, 3, 4], i] == ([0, 0, 0, 0])):
+            if all(self.f[[0, 2, 3, 4], i] == ([0, 0, 0, 0])) and self.nelz > 1:
                 # building force vector
                 F = numpy.zeros(L_y)
                 f = self.f[0:6, i] / 2
@@ -1218,7 +1216,9 @@ class ElasticityProblem3(Problem):
                 F = cvxopt.matrix(F)
                 # solving the system
                 try:
+                    start = time.time()
                     cvxopt.cholmod.linsolve(K_y, F)
+                    print(time.time() - start)
 
                     # inserting zeros for displacement of passive elements
                     zeros_array = np.zeros(len(r))
@@ -1230,6 +1230,7 @@ class ElasticityProblem3(Problem):
                     K, K_y, K_z, fixed_y, fixed_z = self.build_K(xPhys_backup)
                     self.passive = passive_backup
                     L_y = K_y.shape[0]
+                    K_y = K_y.tocoo()
                     K_y = cvxopt.spmatrix(
                         K_y.data, K_y.row.astype(int), K_y.col.astype(int))
                     F = numpy.zeros(L_y)
@@ -1254,7 +1255,7 @@ class ElasticityProblem3(Problem):
                 F = self.reshape_F(F, 0)
                 new_u[:, i] = numpy.array(F)[:]
             # For case of pure bending in xz-plane (exploiting symmetry of problem)
-            elif all(self.f[[0, 1, 3, 5], i] == ([0, 0, 0, 0])):
+            elif all(self.f[[0, 1, 3, 5], i] == ([0, 0, 0, 0])) and self.nely > 1:
                 # building force vector
                 F = numpy.zeros(L_z)
                 f = self.f[0:6, i] / 2
@@ -1275,6 +1276,7 @@ class ElasticityProblem3(Problem):
                     K, K_y, K_z, fixed_y, fixed_z = self.build_K(xPhys_backup)
                     self.passive = passive_backup
                     L_z = K_z.shape[0]
+                    K_z = K_z.tocoo()
                     K_z = cvxopt.spmatrix(
                         K_z.data, K_z.row.astype(int), K_z.col.astype(int))
                     F = numpy.zeros(L_z)
@@ -1318,6 +1320,7 @@ class ElasticityProblem3(Problem):
                     K, K_y, K_z, fixed_y, fixed_z = self.build_K(xPhys_backup)
                     self.passive = passive_backup
                     L = K.shape[0]
+                    K = K.tocoo()
                     K = cvxopt.spmatrix(
                         K.data, K.row.astype(int), K.col.astype(int))
                     F = numpy.zeros(L)
@@ -1694,12 +1697,21 @@ class ComplianceProblem3(ElasticityProblem3):
         start = time.time()
 
         # make sure x stays symmetrical with respect to xy and xz-plane
-        x = numpy.reshape(x, (self.nelx, self.nelz, self.nely), order='C')
-        x_flipped_0 = x[:, int(self.nelz / 2):, :]
-        x_flipped = numpy.flip(x_flipped_0, axis=1)
-        x_flipped = numpy.flip(x_flipped, axis=2)
-        x = numpy.hstack((x_flipped, x_flipped_0))
+        if self.nelz > 1 and self.nely > 1:
+            x = numpy.reshape(x, (self.nelx, self.nelz, self.nely), order='C')
+            x_flipped_0 = x[:, int(self.nelz / 2):, :]
+            x_flipped = numpy.flip(x_flipped_0, axis=1)
+            x_flipped = numpy.flip(x_flipped, axis=2)
+            x = numpy.hstack((x_flipped, x_flipped_0))
+
+        # output_folder = "output"
+        # output_file = os.path.join(output_folder, f"output_{self.iter}.mat")
+        # scipy.io.savemat(output_file, {'data': x})
+
         x = numpy.reshape(x, x.size, order='C')
+
+
+
 
         print(self.iter)
         self.iter += 1
@@ -1780,7 +1792,8 @@ class MinMassProblem2(ElasticityProblem2):
 
         print('Iteration:', self.iter)
         self.iter += 1
-
+        if self.gui != 0:
+            self.gui.update(self.xPhys)
         self.init = 1
         for i in range(len(self.constraints)):
             self.f[:2] = self.f[:2] * 0
@@ -1791,8 +1804,7 @@ class MinMassProblem2(ElasticityProblem2):
             self.init = 0
 
         print(result)
-        if self.gui != 0:
-            self.gui.update(self.xPhys)
+
 
     def compute_constraint(
             self, x: numpy.ndarray, dc: numpy.ndarray) -> float:
@@ -1813,8 +1825,8 @@ class MinMassProblem2(ElasticityProblem2):
 
         """
         # Filter design variables
-        self.filter_variables(x)
-        # self.xPhys = x.copy()
+        # self.filter_variables(x)
+        self.xPhys = x.copy()
 
         # calculate displacement for force/moment on each master dof -> combinations can be calculated quickly
         if self.init == 1 and len(self.constraints) > 2:
@@ -1997,12 +2009,13 @@ class MinMassProblem3(ElasticityProblem3):
 
         """
         # make sure x stays symmetrical with respect to xy and xz-plane
-        x = numpy.reshape(x, (self.nelx, self.nelz, self.nely), order='C')
-        x_flipped_0 = x[:, int(self.nelz / 2):, :]
-        x_flipped = numpy.flip(x_flipped_0, axis=1)
-        x_flipped = numpy.flip(x_flipped, axis=2)
-        x = numpy.hstack((x_flipped, x_flipped_0))
-        x = numpy.reshape(x, x.size, order='C')
+        if self.nelz > 1 and self.nely > 1:
+            x = numpy.reshape(x, (self.nelx, self.nelz, self.nely), order='C')
+            x_flipped_0 = x[:, int(self.nelz / 2):, :]
+            x_flipped = numpy.flip(x_flipped_0, axis=1)
+            x_flipped = numpy.flip(x_flipped, axis=2)
+            x = numpy.hstack((x_flipped, x_flipped_0))
+            x = numpy.reshape(x, x.size, order='C')
 
         # Filter design variables
         # self.filter_variables(x)

@@ -24,7 +24,7 @@ def read_array_from_file(file_path):
     return numpy.array(array).astype(numpy.float64)
 
 
-nelx, nely, nelz = 40, 10, 10
+nelx, nely, nelz = 80, 20, 20
 volfrac = 0.2  # Volume fraction for constraints
 penal = 3  # Penalty for SIMP
 rmin = 2
@@ -39,7 +39,7 @@ bc = FixedBeamBoundaryConditions(nelx, nely, nelz)
 # define force vector
 F = numpy.zeros((6, 1))
 F[1, 0] = 1  # 0: F_x, 1: F_y, 2: F_z, 3: M_x, 4: M_y, 5: M_z || 0: F_y, 1: M_z (2D)
-# F[5, 0] = -0.5
+# F[4, 0] = 1
 # F[2, 1] = 1
 # F[4, 1] = 0.5
 # F[0, 1] = 5
@@ -60,8 +60,9 @@ solver = TopOptSolver(problem, len(constraints))
 
 x_opt = solver.optimize(x)
 
+
 # Calculate and display Compliance and stiffness matrix of reduced system
-_, C_red = problem.compute_reduced_stiffness(problem.xPhys)
+_, C_red = problem.compute_reduced_stiffness(x_opt)
 # display optimized topology
 x_to_stl(nelx, nely, nelz, 0.1, x_opt, 'output.stl')
 

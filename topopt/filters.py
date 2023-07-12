@@ -12,7 +12,7 @@ import scipy
 class Filter(abc.ABC):
     """Filter solutions to topology optimization to avoid checker boarding."""
 
-    def __init__(self, nelx: int, nely: int, rmin: float):
+    def __init__(self, nelx: int, nely: int, nelz: int = 1, rmin: float = 1.0):
         """
         Create a filter to filter solutions.
 
@@ -24,36 +24,69 @@ class Filter(abc.ABC):
             The number of elements in the x direction.
         nely:
             The number of elements in the y direction.
+        nelz:
+            The number of elements in the z direction.
         rmin:
             The filter radius.
 
         """
         self._repr_string = "{}(nelx={:d}, nely={:d}, rmin={:g})".format(
             self.__class__.__name__, nelx, nely, rmin)
-        nfilter = int(nelx * nely * ((2 * (numpy.ceil(rmin) - 1) + 1)**2))
-        iH = numpy.zeros(nfilter)
-        jH = numpy.zeros(nfilter)
-        sH = numpy.zeros(nfilter)
-        cc = 0
-        for i in range(nelx):
-            for j in range(nely):
-                row = i * nely + j
-                kk1 = int(numpy.maximum(i - (numpy.ceil(rmin) - 1), 0))
-                kk2 = int(numpy.minimum(i + numpy.ceil(rmin), nelx))
-                ll1 = int(numpy.maximum(j - (numpy.ceil(rmin) - 1), 0))
-                ll2 = int(numpy.minimum(j + numpy.ceil(rmin), nely))
-                for k in range(kk1, kk2):
-                    for l in range(ll1, ll2):
-                        col = k * nely + l
-                        fac = rmin - numpy.sqrt(
-                            ((i - k) * (i - k) + (j - l) * (j - l)))
-                        iH[cc] = row
-                        jH[cc] = col
-                        sH[cc] = numpy.maximum(0.0, fac)
-                        cc = cc + 1
+
+        if nelz > 1:  # 3D case
+            nfilter = int(nelx * nely * nelz * ((2 * (numpy.ceil(rmin) - 1) + 1) ** 3))
+            iH = numpy.zeros(nfilter)
+            jH = numpy.zeros(nfilter)
+            sH = numpy.zeros(nfilter)
+            cc = 0
+
+            for i in range(nelx):
+                for j in range(nelz):
+                    for h in range(nely):
+                        row = i * nelz * nely + j * nely + h
+                        kk1 = int(numpy.maximum(i - (numpy.ceil(rmin) - 1), 0))
+                        kk2 = int(numpy.minimum(i + numpy.ceil(rmin), nelx))
+                        ll1 = int(numpy.maximum(j - (numpy.ceil(rmin) - 1), 0))
+                        ll2 = int(numpy.minimum(j + numpy.ceil(rmin), nelz))
+                        mm1 = int(numpy.maximum(h - (numpy.ceil(rmin) - 1), 0))
+                        mm2 = int(numpy.minimum(h + numpy.ceil(rmin), nely))
+
+                        for k in range(kk1, kk2):
+                            for l in range(ll1, ll2):
+                                for m in range(mm1, mm2):
+                                    col = k * nelz * nely + l * nely + m
+                                    fac = rmin - numpy.sqrt(
+                                        ((i - k) * (i - k) + (j - l) * (j - l) + (h - m) * (h - m)))
+                                    iH[cc] = row
+                                    jH[cc] = col
+                                    sH[cc] = numpy.maximum(0.0, fac)
+                                    cc = cc + 1
+        else:  # 2D case
+            nfilter = int(nelx * nely * ((2 * (numpy.ceil(rmin) - 1) + 1) ** 2))
+            iH = numpy.zeros(nfilter)
+            jH = numpy.zeros(nfilter)
+            sH = numpy.zeros(nfilter)
+            cc = 0
+            for i in range(nelx):
+                for j in range(nely):
+                    row = i * nely + j
+                    kk1 = int(numpy.maximum(i - (numpy.ceil(rmin) - 1), 0))
+                    kk2 = int(numpy.minimum(i + numpy.ceil(rmin), nelx))
+                    ll1 = int(numpy.maximum(j - (numpy.ceil(rmin) - 1), 0))
+                    ll2 = int(numpy.minimum(j + numpy.ceil(rmin), nely))
+                    for k in range(kk1, kk2):
+                        for l in range(ll1, ll2):
+                            col = k * nely + l
+                            fac = rmin - numpy.sqrt(
+                                ((i - k) * (i - k) + (j - l) * (j - l)))
+                            iH[cc] = row
+                            jH[cc] = col
+                            sH[cc] = numpy.maximum(0.0, fac)
+                            cc = cc + 1
+
         # Finalize assembly and convert to csc format
         self.H = scipy.sparse.coo_matrix(
-            (sH, (iH, jH)), shape=(nelx * nely, nelx * nely)).tocsc()
+            (sH, (iH, jH)), shape=(nelx * nely * nelz, nelx * nely * nelz)).tocsc()
         self.Hs = self.H.sum(1)
 
     def __str__(self) -> str:
@@ -197,7 +230,7 @@ class DensityBasedFilter(Filter):
 
         """
         dobj[:] = numpy.asarray(
-            self.H * (dobj[numpy.newaxis].T / self.Hs))[:, 0]
+            self.H * dobj[numpy.newaxis].T / self.Hs)[:, 0]
 
     def filter_volume_sensitivities(
             self, xPhys: numpy.ndarray, dv: numpy.ndarray) -> None:
@@ -212,4 +245,4 @@ class DensityBasedFilter(Filter):
             The filtered volume sensitivities to be computed.
 
         """
-        dv[:] = numpy.asarray(self.H * (dv[numpy.newaxis].T / self.Hs))[:, 0]
+        dv[:] = numpy.asarray(self.H * dv[numpy.newaxis].T / self.Hs)[:, 0]

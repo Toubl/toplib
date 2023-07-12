@@ -16,7 +16,7 @@ class GUI(object):
     Draws the outputs a topology optimization problem.
     """
 
-    def __init__(self, problem, title=""):
+    def __init__(self, bc, title=""):
         """
         Create a plot and draw the initial design.
 
@@ -24,14 +24,17 @@ class GUI(object):
             problem (topopt.Problem): problem to visualize
             title (str): title of the plot
         """
-        self.problem = problem
-        self.title = title
-        plt.ion()  # Ensure that redrawing is possible
-        self.init_subplots()
-        plt.xlabel(title)
-        # self.fig.tight_layout()
-        self.plot_force_arrows()
-        self.fig.show()
+        if bc.nelz == 1:
+            self.bc = bc
+            self.title = title
+            plt.ion()  # Ensure that redrawing is possible
+            self.init_subplots()
+            plt.xlabel(title)
+            # self.fig.tight_layout()
+            self.plot_force_arrows()
+            self.fig.show()
+
+
 
     def __str__(self):
         """Create a string representation of the solver."""
@@ -43,21 +46,21 @@ class GUI(object):
 
     def __repr__(self):
         """Create a representation of the solver."""
-        return '{}(problem={!r}, title="{}")'.format(
-                self.__class__.__name__, self.problem, self.title)
+        return '{}(bc={!r}, title="{}")'.format(
+                self.__class__.__name__, self.bc, self.title)
 
     def init_subplots(self):
         """Create the subplots."""
         self.fig, self.ax = plt.subplots()
         self.im = self.ax.imshow(
-            -numpy.zeros((self.problem.nely, self.problem.nelx)), cmap='gray',
+            -numpy.zeros((self.bc.nely, self.bc.nelx)), cmap='gray',
             interpolation='none', norm=colors.Normalize(vmin=-1, vmax=0))
 
     def plot_force_arrows(self):
         """Add arrows to the plot for each force."""
-        arrowprops = {"arrowstyle": "->", "connectionstyle": "arc3", "lw": "2",
+        arrowprops = {"arrowstyle": "->", "connectionstyle": "arc3", "lw": 2,
                       "color": 0}
-        nelx, nely, f = (self.problem.nelx, self.problem.nely, self.problem.f)
+        nelx, nely, f = (self.bc.nelx, self.bc.nely, self.bc.f)
         cmap = plt.cm.get_cmap("hsv", f.shape[1] + 1)
         for load_i in range(f.shape[1]):
             nz = numpy.nonzero(f[:, load_i])
@@ -76,7 +79,7 @@ class GUI(object):
     def update(self, xPhys, title=None):
         """Plot the results."""
         self.im.set_array(
-            -xPhys.reshape((self.problem.nelx, self.problem.nely)).T)
+            -xPhys.reshape((self.bc.nelx, self.bc.nely)).T)
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
         if title is not None:
@@ -92,12 +95,12 @@ class StressGUI(GUI):
     optimization problem.
     """
 
-    def __init__(self, problem, title=""):
+    def __init__(self, bc, title=""):
         """Create a plot and draw the initial design."""
         self.mcmap = colormaps.viridis
         self.myColorMap2 = colormaps.ScalarMappable(
             norm=colors.Normalize(vmin=-1, vmax=1), cmap=self.mcmap)
-        GUI.__init__(self, problem)
+        GUI.__init__(self, bc)
         plt.suptitle(title)
         title_sty = {"boxstyle": "square,pad=0.0", "fc": "white", "ec": "none"}
         self.ax.set_title("Von Mises Stress", bbox=title_sty)
@@ -110,17 +113,17 @@ class StressGUI(GUI):
         self.fig, (self.ax, self.ax2) = plt.subplots(figsize=(8, 4), ncols=2)
         # Generate image for the plots
         self.stress_im = self.ax.imshow(
-            numpy.zeros((self.problem.nely, self.problem.nelx, 4)),
+            numpy.zeros((self.bc.nely, self.bc.nelx, 4)),
             norm=colors.Normalize(vmin=0, vmax=1), cmap='plasma')
         self.stress_d_im = self.ax2.imshow(
-            numpy.zeros((self.problem.nely, self.problem.nelx, 4)),
+            numpy.zeros((self.bc.nely, self.bc.nelx, 4)),
             norm=colors.Normalize(vmin=-1, vmax=1), cmap=self.mcmap)
         self.cbar = self.fig.colorbar(self.stress_im, ax=self.ax)
         self.cbar2 = self.fig.colorbar(self.stress_d_im, ax=self.ax2)
 
     def update(self, xPhys, title=None):
         """Plot the results."""
-        nelx, nely = self.problem.nelx, self.problem.nely
+        nelx, nely = self.bc.nelx, self.bc.nely
 
         def values_to_rgba(values, alpha_values, cmap):
             values_rgba = cmap.to_rgba(values)

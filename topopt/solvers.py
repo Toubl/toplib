@@ -12,15 +12,11 @@ import numpy
 import nlopt
 
 from topopt.problems import Problem
-from topopt.filters import Filter
-from topopt.guis import GUI
-
 
 class TopOptSolver:
     """Solver for topology optimization problems using NLopt's MMA solver."""
 
-    def __init__(self, problem: Problem, volfrac: float, filter: Filter,
-                 gui: GUI, maxeval=2000, ftol_rel=1e-3):
+    def __init__(self, problem: Problem, n_constraints, maxeval=40, ftol_rel=1e-6):
         """
         Create a solver to solve the problem.
 
@@ -41,11 +37,11 @@ class TopOptSolver:
 
         """
         self.problem = problem
-        self.filter = filter
-        self.gui = gui
 
-        n = problem.nelx * problem.nely
+        n = problem.nelx * problem.nely * problem.nelz
         self.opt = nlopt.opt(nlopt.LD_MMA, n)
+        self.opt.set_param('inner_maxeval', 2)
+        # self.opt.set_param('verbosity', 1)
         self.xPhys = numpy.ones(n)
 
         # set bounds on the value of x (0 ≤ x ≤ 1)
@@ -55,19 +51,15 @@ class TopOptSolver:
         # set stopping criteria
         self.maxeval = maxeval
         self.ftol_rel = ftol_rel
+        self.xtol_rel = ftol_rel
 
-        # set objective and constraint functions
-        self.opt.set_min_objective(self.objective_function)
-        self.opt.add_inequality_constraint(self.volume_function, 0)
-        self.volfrac = volfrac  # max volume fraction to use
-
-        # setup filter
-        self.passive = problem.bc.passive_elements
-        if self.passive.size > 0:
-            self.xPhys[self.passive] = 0
-        self.active = problem.bc.active_elements
-        if self.active.size > 0:
-            self.xPhys[self.active] = 1
+        # setting objective and constraints function(s)
+        if (n_constraints == 0):
+            self.opt.set_min_objective(self.problem.objective_function)
+            self.opt.add_inequality_mconstraint(self.problem.constraints_function, numpy.zeros(1))
+        elif (n_constraints != 0):
+            self.opt.set_min_objective(self.problem.objective_function)
+            self.opt.add_inequality_mconstraint(self.problem.constraints_function, numpy.zeros(n_constraints))
 
     def __str__(self):
         """Create a string representation of the solver."""
@@ -89,9 +81,20 @@ class TopOptSolver:
         """:obj:`float`: Relative tolerance for convergence."""
         return self.opt.get_ftol_rel()
 
+
     @ftol_rel.setter
     def ftol_rel(self, ftol_rel):
         self.opt.set_ftol_rel(ftol_rel)
+
+    @property
+    def xtol_rel(self):
+        """:obj:`float`: Relative tolerance for convergence."""
+        return self.opt.get_xtol_rel()
+
+
+    @xtol_rel.setter
+    def xtol_rel(self, xtol_rel):
+        self.opt.set_xtol_rel(xtol_rel)
 
     @property
     def maxeval(self):
@@ -99,8 +102,8 @@ class TopOptSolver:
         return self.opt.get_maxeval()
 
     @maxeval.setter
-    def maxeval(self, ftol_rel):
-        self.opt.set_maxeval(ftol_rel)
+    def maxeval(self, maxeval):
+        self.opt.set_maxeval(maxeval)
 
     def optimize(self, x: numpy.ndarray) -> numpy.ndarray:
         """
@@ -121,59 +124,7 @@ class TopOptSolver:
         x = self.opt.optimize(x)
         return x
 
-    def filter_variables(self, x: numpy.ndarray) -> numpy.ndarray:
-        """
-        Filter the variables and impose values on passive/active variables.
 
-        Parameters
-        ----------
-        x:
-            The variables to be filtered.
-
-        Returns
-        -------
-        numpy.ndarray
-            The filtered "physical" variables.
-
-        """
-        self.filter.filter_variables(x, self.xPhys)
-        if self.passive.size > 0:
-            self.xPhys[self.passive] = 0
-        if self.active.size > 0:
-            self.xPhys[self.active] = 1
-        return self.xPhys
-
-    def objective_function(
-            self, x: numpy.ndarray, dobj: numpy.ndarray) -> float:
-        """
-        Compute the objective value and gradient.
-
-        Parameters
-        ----------
-        x:
-            The design variables for which to compute the objective.
-        dobj:
-            The gradient of the objective to compute.
-
-        Returns
-        -------
-        float
-            The objective value.
-
-        """
-        # Filter design variables
-        self.filter_variables(x)
-
-        # Objective and sensitivity
-        obj = self.problem.compute_objective(self.xPhys, dobj)
-
-        # Sensitivity filtering
-        self.filter.filter_objective_sensitivities(self.xPhys, dobj)
-
-        # Display physical variables
-        self.gui.update(self.xPhys)
-
-        return obj
 
     def objective_function_fdiff(self, x: numpy.ndarray, dobj: numpy.ndarray,
                                  epsilon=1e-6) -> float:
@@ -210,36 +161,7 @@ class TopOptSolver:
             print("finite differences: {:g}".format(
                 numpy.linalg.norm(dobjf - dobj0)))
             dobj[:] = dobj0
-
         return obj
-
-    def volume_function(self, x: numpy.ndarray, dv: numpy.ndarray) -> float:
-        """
-        Compute the volume constraint value and gradient.
-
-        Parameters
-        ----------
-        x:
-            The design variables for which to compute the volume constraint.
-        dobj:
-            The gradient of the volume constraint to compute.
-
-        Returns
-        -------
-        float
-            The volume constraint value.
-
-        """
-        # Filter design variables
-        self.filter_variables(x)
-
-        # Volume sensitivities
-        dv[:] = 1.0
-
-        # Sensitivity filtering
-        self.filter.filter_volume_sensitivities(self.xPhys, dv)
-
-        return self.xPhys.sum() - self.volfrac * x.size
 
 
 # TODO: Seperate optimizer from TopOptSolver
@@ -248,21 +170,103 @@ class TopOptSolver:
 #
 #
 # TODO: Port over OC to TopOptSolver
-# class OCSolver(TopOptSolver):
-#     def oc(self, x, volfrac, dc, dv, g):
-#         """ Optimality criterion """
-#         l1 = 0
-#         l2 = 1e9
-#         move = 0.2
-#         # reshape to perform vector operations
-#         xnew = np.zeros(nelx * nely)
-#         while (l2 - l1) / (l1 + l2) > 1e-3:
-#             lmid = 0.5 * (l2 + l1)
-#             xnew[:] =  np.maximum(0.0, np.maximum(x - move, np.minimum(1.0,
-#                 np.minimum(x + move, x * np.sqrt(-dc / dv / lmid)))))
-#             gt = g + np.sum((dv * (xnew - x)))
-#             if gt > 0:
-#                 l1 = lmid
-#             else:
-#                 l2 = lmid
-#         return (xnew, gt)
+class OCSolver(TopOptSolver):
+    def oc(self, x, volfrac, dc):
+        """ Optimality criterion """
+        l1 = 0
+        l2 = 1e9
+        move = volfrac / 2
+        # reshape to perform vector operations
+        xnew = numpy.zeros((len(x)))
+
+        while ((l2 - l1) / (l1 + l2)) > 1e-3:
+            lmid = 0.5 * (l2 + l1)
+            xnew[:] = numpy.maximum(0.0, numpy.maximum(x - move, numpy.minimum(1.0,
+                               numpy.minimum(x + move, x * numpy.sqrt(-dc / lmid)))))
+            gt = numpy.sum(xnew)/(self.problem.nelx * self.problem.nely * self.problem.nelz) - volfrac
+            if gt > 0:
+                l1 = lmid
+            else:
+                l2 = lmid
+        return xnew
+
+    def optimize(self, x: numpy.ndarray):
+        maxiter = 40
+        i = 0
+        j = 0
+
+        self.dc = x.copy()
+        self.xPhys = x.copy()
+
+        while maxiter > i:
+            if j == 0:
+                self.problem.f[0:6] = self.problem.f[0:6] * 0
+                self.problem.f[1] = 1
+                j = j + 1
+            elif j == 1:
+                self.problem.f[0:6] = self.problem.f[0:6] * 0
+                self.problem.f[2] = 1
+                j = 0
+            # elif j == 2:
+            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+            #     self.problem.f[4] = 10
+            #     j = j + 1
+            # elif j == 3:
+            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+            #     self.problem.f[5] = 10
+            #     j = 0
+
+            self.objective_function(x, self.dc)
+            x_new = self.oc(self.xPhys, self.volfrac, self.dc)
+            x = x_new
+            i = i + 1
+
+        self.filter = DensityBasedFilter(self.problem.nelx, self.problem.nely, self.problem.nelz, 1.5)
+        i = 0
+
+        while maxiter > i:
+            if j == 0:
+                self.problem.f[0:6] = self.problem.f[0:6] * 0
+                self.problem.f[1] = 1
+                j = j + 1
+            elif j == 1:
+                self.problem.f[0:6] = self.problem.f[0:6] * 0
+                self.problem.f[2] = 1
+                j = 0
+            # elif j == 2:
+            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+            #     self.problem.f[4] = 10
+            #     j = j + 1
+            # elif j == 3:
+            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+            #     self.problem.f[5] = 10
+            #     j = 0
+            self.objective_function(x, self.dc)
+            x_new = self.oc(self.xPhys, self.volfrac, self.dc)
+            x = x_new
+            i = i + 1
+
+        i = 0
+        while 28 > i:
+            if j == 0:
+                self.problem.f[0:6] = self.problem.f[0:6] * 0
+                self.problem.f[1] = 1
+                j = j + 1
+            elif j == 1:
+                self.problem.f[0:6] = self.problem.f[0:6] * 0
+                self.problem.f[2] = 1
+                j = 0
+            # elif j == 2:
+            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+            #     self.problem.f[4] = 10
+            #     j = j + 1
+            # elif j == 3:
+            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+            #     self.problem.f[5] = 10
+                j = 0
+            self.objective_function(x, self.dc)
+            x_new = self.oc(x, self.volfrac, self.dc)
+            x = x_new
+            i = i + 1
+
+        return x

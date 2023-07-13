@@ -13,6 +13,7 @@ from .boundary_conditions import BoundaryConditions
 from .utils import deleterowcol
 from topopt.filters import Filter
 from topopt.filters import DensityBasedFilter
+import matlab.engine
 
 import time
 import os
@@ -58,6 +59,10 @@ class Problem(abc.ABC):
         self.xPhys = numpy.ones(self.nel)
 
         self.filter = filter
+
+        print('starting')
+        self.eng = matlab.engine.start_matlab()
+        print('started')
 
         # Count degrees of fredom
         if self.nelz > 1:
@@ -879,8 +884,7 @@ class ElasticityProblem3(Problem):
 
                     # Add to stiffness matrix
                     KE += numpy.dot(numpy.dot(B.T, C), B) * numpy.linalg.det(JacobianMatrix)
-
-        return KE
+        return KE, B, C
 
     def RBE_interface(self, nelx, nely, nelz, K, case):
         """
@@ -960,7 +964,7 @@ class ElasticityProblem3(Problem):
         return K_r
     def build_indices(self) -> None:
         """Build the index vectors for the finite element coo matrix format."""
-        self.KE = self.lk(E=self.Emax, nu=self.nu)
+        self.KE, self.B, self.C = self.lk(E=self.Emax, nu=self.nu)
         nodenrs = numpy.reshape(numpy.arange(1, (1 + self.nelx) * (1 + self.nely) * (1 + self.nelz) + 1, dtype=numpy.int32),
                              (1 + self.nely, 1 + self.nelz, 1 + self.nelx), order='F')  # nodes numbering             #3D#
         edofVec = numpy.reshape(3 * nodenrs[0:self.nely, 0:self.nelz, 0:self.nelx] + 1, (self.nel, 1), order='F')  # #3D#
@@ -1157,7 +1161,7 @@ class ElasticityProblem3(Problem):
         # if deleting of dofs of passive elements leaves element disconnected matrix will become singular
         # in this case calculation is performed again with passive elements of previous iteration
         if self.reducedofs == 1:
-            self.passive = scipy.sparse.csr_matrix(xPhys < 1e-7)
+            self.passive = scipy.sparse.csr_matrix(xPhys < 1e-3)
             if not(isinstance(self.passive_0, int)):
                 self.passive = numpy.union1d(self.passive.indices, self.passive_0)
             else:
@@ -1178,30 +1182,36 @@ class ElasticityProblem3(Problem):
             t = numpy.diff(K.indptr) == 0
             t = scipy.sparse.csr_matrix(t)
             t = t.indices
-            K = deleterowcol(K, t, t).tocoo()
+            K = deleterowcol(K, t, t)#.tocoo()
             L = K.shape[0]
-            K = cvxopt.spmatrix(
-                K.data, K.row.astype(int), K.col.astype(int))
+            mat_data = {'K': K}
+            scipy.io.savemat('K.mat', mat_data)
+            # K = cvxopt.spmatrix(
+            #     K.data, K.row.astype(int), K.col.astype(int))
 
         if type(K_y) is not int:
             # K_y = K_y.tocsr()
             r = numpy.diff(K_y.indptr) == 0
             r = scipy.sparse.csr_matrix(r)
             r = r.indices
-            K_y = deleterowcol(K_y, r, r).tocoo()
+            K_y = deleterowcol(K_y, r, r)#.tocoo()
             L_y = K_y.shape[0]
-            K_y = cvxopt.spmatrix(
-                K_y.data, K_y.row.astype(int), K_y.col.astype(int))
+            mat_data = {'K': K_y}
+            scipy.io.savemat('K_y.mat', mat_data)
+            # K_y = cvxopt.spmatrix(
+            #     K_y.data, K_y.row.astype(int), K_y.col.astype(int))
 
         if type(K_z) is not int:
             # K_z = K_z.tocsr()
             s = numpy.diff(K_z.indptr) == 0
             s = scipy.sparse.csr_matrix(s)
             s = s.indices
-            K_z = deleterowcol(K_z.tocsc(), s, s).tocoo()
+            K_z = deleterowcol(K_z.tocsc(), s, s)#.tocoo()
             L_z = K_z.shape[0]
-            K_z = cvxopt.spmatrix(
-                K_z.data, K_z.row.astype(int), K_z.col.astype(int))
+            mat_data = {'K': K_z}
+            scipy.io.savemat('K_z.mat', mat_data)
+            # K_z = cvxopt.spmatrix(
+            #     K_z.data, K_z.row.astype(int), K_z.col.astype(int))
 
         new_u = self.u.copy()
 
@@ -1213,11 +1223,17 @@ class ElasticityProblem3(Problem):
                 f = self.f[0:6, i] / 2
                 f = f[[0, 1, 2, 4, 5]]
                 F[0:5] = f
-                F = cvxopt.matrix(F)
+                # F = cvxopt.matrix(F)
                 # solving the system
                 try:
                     start = time.time()
-                    cvxopt.cholmod.linsolve(K_y, F)
+                    # cvxopt.cholmod.linsolve(K_y, F)
+                    mat_data = {'F': F}
+                    scipy.io.savemat('F.mat', mat_data)
+                    print('in')
+                    output = self.eng.example(0)
+                    print('out')
+                    F = numpy.array(output)
                     print(time.time() - start)
 
                     # inserting zeros for displacement of passive elements
@@ -1261,11 +1277,16 @@ class ElasticityProblem3(Problem):
                 f = self.f[0:6, i] / 2
                 f = f[[0, 1, 2, 4, 5]]
                 F[0:5] = f
-                F = cvxopt.matrix(F)
+                # F = cvxopt.matrix(F)
                 # solving the system
                 try:
-                    cvxopt.cholmod.linsolve(K_z, F)
-
+                    # cvxopt.cholmod.linsolve(K_z, F)
+                    mat_data = {'F': F}
+                    scipy.io.savemat('F.mat', mat_data)
+                    print('in')
+                    output = self.eng.example(1)
+                    print('out')
+                    F = numpy.array(output)
                     # inserting zeros for displacement of passive elements
                     zeros_array = np.zeros(len(s))
                     indices = np.arange(len(s))
@@ -1305,11 +1326,16 @@ class ElasticityProblem3(Problem):
                 # building force vector
                 F = numpy.zeros(L)
                 F[0:6] = self.f[0:6, i]  # Force vector of reduced problem
-                F = cvxopt.matrix(F)
+                # F = cvxopt.matrix(F)
                 # solving the system
                 try:
-                    cvxopt.cholmod.linsolve(K, F)
-
+                    # cvxopt.cholmod.linsolve(K, F)
+                    mat_data = {'F': F}
+                    scipy.io.savemat('F.mat', mat_data)
+                    print('in')
+                    output = self.eng.example(2)
+                    print('out')
+                    F = numpy.array(output)
                     # inserting zeros for displacement of passive elements
                     zeros_array = np.zeros(len(t))
                     indices = np.arange(len(t))
@@ -1456,6 +1482,27 @@ class ElasticityProblem3(Problem):
         # Setup and solve FE problem
         # obtain displacements self.u
         self.update_displacements(xPhys)
+
+        u = self.u[::3, 0]
+        v = self.u[1::3, 0]
+        w = self.u[2::3, 0]
+        ui = self.u[:, 0][self.edofMat].reshape(-1, 24)
+        sigma = self.C @ self.B @ ui.T
+        dE = numpy.empty(xPhys.shape)
+        E = self.compute_young_moduli(xPhys, dE)
+        sigma = E * sigma
+        u = numpy.reshape(u, (self.nelx + 1, self.nelz + 1, self.nely + 1), order='C')
+        v = numpy.reshape(v, (self.nelx + 1, self.nelz + 1, self.nely + 1), order='C')
+        w = numpy.reshape(w, (self.nelx + 1, self.nelz + 1, self.nely + 1), order='C')
+        sigma_11 = numpy.reshape(sigma[0, :], (self.nelx, self.nelz, self.nely), order='C')
+        sigma_22 = numpy.reshape(sigma[1, :], (self.nelx, self.nelz, self.nely), order='C')
+        sigma_33 = numpy.reshape(sigma[2, :], (self.nelx, self.nelz, self.nely), order='C')
+        sigma_12 = numpy.reshape(sigma[3, :], (self.nelx, self.nelz, self.nely), order='C')
+        sigma_23 = numpy.reshape(sigma[4, :], (self.nelx, self.nelz, self.nely), order='C')
+        sigma_13 = numpy.reshape(sigma[5, :], (self.nelx, self.nelz, self.nely), order='C')
+        output_folder = "output"
+        output_file = os.path.join(output_folder, f"output_displacements_{self.iter}.mat")
+        scipy.io.savemat(output_file, {'u': u, 'v': v, 'w': w, 'sigma_11': sigma_11, 'sigma_22': sigma_22, 'sigma_33': sigma_33, 'sigma_12': sigma_12, 'sigma_23': sigma_23, 'sigma_13': sigma_13})
 
         c = 0.0
         dc[:] = 0.0
@@ -1704,9 +1751,9 @@ class ComplianceProblem3(ElasticityProblem3):
             x_flipped = numpy.flip(x_flipped, axis=2)
             x = numpy.hstack((x_flipped, x_flipped_0))
 
-        # output_folder = "output"
-        # output_file = os.path.join(output_folder, f"output_{self.iter}.mat")
-        # scipy.io.savemat(output_file, {'data': x})
+        output_folder = "output"
+        output_file = os.path.join(output_folder, f"output_{self.iter}.mat")
+        scipy.io.savemat(output_file, {'data': x})
 
         x = numpy.reshape(x, x.size, order='C')
 
@@ -1715,6 +1762,12 @@ class ComplianceProblem3(ElasticityProblem3):
 
         print(self.iter)
         self.iter += 1
+
+        # continuation method
+        # if (self.iter % 50) == 0:
+        #     self.penalty += 0.2
+        #     if self.penalty > 3:
+        #         self.penalty = 3
 
         # Filter design variables
         # self.filter_variables(x)
@@ -1799,7 +1852,11 @@ class MinMassProblem2(ElasticityProblem2):
             self.f[:2] = self.f[:2] * 0
             self.f[:2] = self.constraint_f[i]
 
-            result[i] = self.compute_constraint(x, grad[i, :]) - self.constraints[i]
+            if self.constraints[i] > 0:
+                result[i] = self.compute_constraint(x, grad[i, :]) - self.constraints[i]
+            else:
+                result[i] = -self.compute_constraint(x, grad[i, :]) - self.constraints[i]
+                grad[i, :] = -grad[i, :]
 
             self.init = 0
 
@@ -2071,7 +2128,12 @@ class MinMassProblem3(ElasticityProblem3):
 
         """
         # calculate displacement for force/moment combination from precalculated displacements
-        self.u = self.u_predef @ self.f[[1, 2, 4, 5]]
+        if self.desired_y and self.desired_z:
+            self.u = self.u_predef @ self.f[[1, 2, 4, 5]]
+        elif self.desired_y:
+            self.u = self.u_predef @ self.f[[1, 5]]
+        elif self.desired_z:
+            self.u = self.u_predef @ self.f[[2, 4]]
 
         c = 0.0
         dc[:] = 0.0
@@ -2142,16 +2204,34 @@ class MinMassProblem3(ElasticityProblem3):
 
         C_red = numpy.zeros((6, 6))
         F = self.f[:6].copy()
-        self.u_predef = np.zeros((len(self.u), 4))
         m = 0
-        for i in [1, 2, 4, 5]:
-            self.f[0:6] = 0 * self.f[0:6]
-            self.f[i] = 1
-            U, u_m = self.compute_displacements(xPhys)
-            self.u_predef[:, m] = U[:, 0]
-            C_red[:, i] = u_m
-            m = m + 1
-
+        if self.desired_y and self.desired_z:
+            self.u_predef = np.zeros((len(self.u), 4))
+            for i in [1, 2, 4, 5]:
+                self.f[0:6] = 0 * self.f[0:6]
+                self.f[i] = 1
+                U, u_m = self.compute_displacements(xPhys)
+                self.u_predef[:, m] = U[:, 0]
+                C_red[:, i] = u_m
+                m = m + 1
+        elif self.desired_y:
+            self.u_predef = np.zeros((len(self.u), 2))
+            for i in [1, 5]:
+                self.f[0:6] = 0 * self.f[0:6]
+                self.f[i] = 1
+                U, u_m = self.compute_displacements(xPhys)
+                self.u_predef[:, m] = U[:, 0]
+                C_red[:, i] = u_m
+                m = m + 1
+        elif self.desired_z:
+            self.u_predef = np.zeros((len(self.u), 2))
+            for i in [2, 4]:
+                self.f[0:6] = 0 * self.f[0:6]
+                self.f[i] = 1
+                U, u_m = self.compute_displacements(xPhys)
+                self.u_predef[:, m] = U[:, 0]
+                C_red[:, i] = u_m
+                m = m + 1
         if hasattr(self, 'C_desired_y') and hasattr(self, 'C_desired_z'):
             plot_quadratic_functions(self.C_desired_y[1, 1], 2 * self.C_desired_y[0, 1], self.C_desired_y[0, 0],
                                  C_red[5, 5], 2 * C_red[1, 5], C_red[1, 1],

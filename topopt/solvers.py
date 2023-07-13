@@ -10,13 +10,16 @@ from __future__ import division
 
 import numpy
 import nlopt
+import matlab.engine
+import keyboard
+
 
 from topopt.problems import Problem
 
 class TopOptSolver:
     """Solver for topology optimization problems using NLopt's MMA solver."""
 
-    def __init__(self, problem: Problem, n_constraints, maxeval=40, ftol_rel=1e-6):
+    def __init__(self, problem: Problem, n_constraints, maxeval=50, ftol_rel=1e-6):
         """
         Create a solver to solve the problem.
 
@@ -124,6 +127,86 @@ class TopOptSolver:
         x = self.opt.optimize(x)
         return x
 
+    def optimize2(self, x: numpy.ndarray, n_iter, n_constraints) -> numpy.ndarray:
+        """
+        Optimize the problem.
+
+        Parameters
+        ----------
+        x:
+            The initial value for the design variables.
+
+        Returns
+        -------
+        numpy.ndarray
+            The optimal value of x found.
+
+        """
+        print('starting solver engine')
+        self.eng = matlab.engine.start_matlab()
+        print('started solver engine')
+        dobj = x.copy() * 0
+        xold1 = x.copy()
+        xold2 = x.copy()
+        low = x.copy() * 0
+        upp = x.copy() * 0 + 1
+        alpha = 1
+        if (n_constraints == 0):
+            grad = numpy.zeros((1, len(x)))
+            result = numpy.zeros((1,))
+            a_0 = 1
+            a_i = 0
+            c_i = 1000
+            d_i = 0
+            for i in range(n_iter):
+                obj = self.problem.objective_function(x, dobj)
+                self.problem.constraints_function(result, x, grad)
+                print('in MMA')
+                res = self.eng.mmasub(matlab.double([1]), matlab.double([len(x)]), i+1, matlab.double(x.tolist()), matlab.double((x*0).tolist()), matlab.double((x*0 + 1).tolist()),
+                                                                                        matlab.double(xold1.tolist()), matlab.double(xold2.tolist()), matlab.double([obj]), matlab.double(dobj.tolist()),
+                                                                                        matlab.double([result[0]]), matlab.double(grad.tolist()), matlab.double(low.tolist()), matlab.double(upp.tolist()), matlab.double([a_0]),
+                                                                                        matlab.double([a_i]), matlab.double([c_i]), matlab.double([d_i]))
+                print('out MMA')
+                xold2 = xold1.copy()
+                xold1 = x.copy()
+                res = numpy.array(res)
+                x = res[:len(x), 0] * alpha + (1 - alpha) * x
+                low = res[len(x):len(x)*2, 0]
+                upp = res[len(x)*2:, 0]
+
+                if keyboard.is_pressed('s'):
+                    print("Execution stopped by user.")
+                    return x
+
+
+        elif (n_constraints != 0):
+            grad = numpy.zeros((n_constraints, len(x)))
+            result = numpy.zeros((n_constraints,))
+            for i in range(n_iter):
+                obj = self.problem.objective_function(x, dobj)
+                self.problem.constraints_function(result, x, grad)
+                print('in MMA')
+                res = self.eng.mmasub(matlab.double([n_constraints]), matlab.double([len(x)]), i + 1, matlab.double(x.tolist()),
+                                      matlab.double((x * 0).tolist()), matlab.double((x * 0 + 1).tolist()),
+                                      matlab.double(xold1.tolist()), matlab.double(xold2.tolist()),
+                                      matlab.double([obj]), matlab.double(dobj.tolist()),
+                                      matlab.double(result[:].tolist()), matlab.double(grad.tolist()),
+                                      matlab.double(low.tolist()), matlab.double(upp.tolist()), 1,
+                                      matlab.double((numpy.zeros((n_constraints, 1))).tolist()), matlab.double(
+                        (numpy.zeros((n_constraints, 1)) + 1000).tolist()), matlab.double((numpy.zeros((n_constraints, 1))).tolist()))
+                print('out MMA')
+                xold2 = xold1.copy()
+                xold1 = x.copy()
+                res = numpy.array(res)
+                x = res[:len(x), 0] * alpha + (1 - alpha) * x
+                low = res[len(x):len(x) * 2, 0]
+                upp = res[len(x) * 2:, 0]
+
+                if keyboard.is_pressed('s'):
+                    print("Execution stopped by user.")
+                    return x
+        return x
+
 
 
     def objective_function_fdiff(self, x: numpy.ndarray, dobj: numpy.ndarray,
@@ -175,11 +258,12 @@ class OCSolver(TopOptSolver):
         """ Optimality criterion """
         l1 = 0
         l2 = 1e9
-        move = volfrac / 2
+        # move = volfrac / 2
+        move = 0.1
         # reshape to perform vector operations
         xnew = numpy.zeros((len(x)))
 
-        while ((l2 - l1) / (l1 + l2)) > 1e-3:
+        while ((l2 - l1) / (l1 + l2)) > 1e-4:
             lmid = 0.5 * (l2 + l1)
             xnew[:] = numpy.maximum(0.0, numpy.maximum(x - move, numpy.minimum(1.0,
                                numpy.minimum(x + move, x * numpy.sqrt(-dc / lmid)))))
@@ -193,80 +277,14 @@ class OCSolver(TopOptSolver):
     def optimize(self, x: numpy.ndarray):
         maxiter = 40
         i = 0
-        j = 0
 
         self.dc = x.copy()
         self.xPhys = x.copy()
 
         while maxiter > i:
-            if j == 0:
-                self.problem.f[0:6] = self.problem.f[0:6] * 0
-                self.problem.f[1] = 1
-                j = j + 1
-            elif j == 1:
-                self.problem.f[0:6] = self.problem.f[0:6] * 0
-                self.problem.f[2] = 1
-                j = 0
-            # elif j == 2:
-            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
-            #     self.problem.f[4] = 10
-            #     j = j + 1
-            # elif j == 3:
-            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
-            #     self.problem.f[5] = 10
-            #     j = 0
-
-            self.objective_function(x, self.dc)
-            x_new = self.oc(self.xPhys, self.volfrac, self.dc)
-            x = x_new
-            i = i + 1
-
-        self.filter = DensityBasedFilter(self.problem.nelx, self.problem.nely, self.problem.nelz, 1.5)
-        i = 0
-
-        while maxiter > i:
-            if j == 0:
-                self.problem.f[0:6] = self.problem.f[0:6] * 0
-                self.problem.f[1] = 1
-                j = j + 1
-            elif j == 1:
-                self.problem.f[0:6] = self.problem.f[0:6] * 0
-                self.problem.f[2] = 1
-                j = 0
-            # elif j == 2:
-            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
-            #     self.problem.f[4] = 10
-            #     j = j + 1
-            # elif j == 3:
-            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
-            #     self.problem.f[5] = 10
-            #     j = 0
-            self.objective_function(x, self.dc)
-            x_new = self.oc(self.xPhys, self.volfrac, self.dc)
-            x = x_new
-            i = i + 1
-
-        i = 0
-        while 28 > i:
-            if j == 0:
-                self.problem.f[0:6] = self.problem.f[0:6] * 0
-                self.problem.f[1] = 1
-                j = j + 1
-            elif j == 1:
-                self.problem.f[0:6] = self.problem.f[0:6] * 0
-                self.problem.f[2] = 1
-                j = 0
-            # elif j == 2:
-            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
-            #     self.problem.f[4] = 10
-            #     j = j + 1
-            # elif j == 3:
-            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
-            #     self.problem.f[5] = 10
-                j = 0
-            self.objective_function(x, self.dc)
-            x_new = self.oc(x, self.volfrac, self.dc)
-            x = x_new
+            self.problem.objective_function(x, self.dc)
+            x_new = self.oc(x, self.problem.volfrac, self.dc)
+            x = x_new.copy()
             i = i + 1
 
         return x

@@ -31,7 +31,7 @@ def read_array_from_file(file_path):
             array.append(entry)
     return numpy.array(array).astype(numpy.float64)
 
-nelx, nely, nelz = 40, 10, 1  # Number of elements in the x y and z-direction
+nelx, nely, nelz = 160, 80, 1  # Number of elements in the x y and z-direction
 volfrac = 1  # Volume fraction for constraints
 penal = 3  # Penalty for SIMP
 rmin = 2  # Filter radius
@@ -61,9 +61,9 @@ bc.set_forces(F)
 # C_desired_y = numpy.linalg.inv(K)
 
 # Directly define desired Compliance matrix
-c_33 = 6000*32
-c_43 = -2000*32
-c_44 = 1000*32
+c_33 = 1000
+c_43 = -500
+c_44 = 1000
 
 C_desired_y = numpy.array([[c_33, c_43], [c_43, c_44]])
 
@@ -81,7 +81,7 @@ constraint, constraint_f = calculate_minimum_strain_energy(C_desired_y[0, 0], C_
 constraints.append(constraint)
 constraints_f.append(constraint_f)
 
-steps = 40
+steps = 10
 numbers = numpy.linspace(-5, 5, num=steps)
 for i in range(steps):
     constraint, constraint_f = calculate_strain_energy(C_desired_y[0, 0], C_desired_y[1, 0], C_desired_y[1, 1], constraints_f[0][1] + numbers[i], 1)
@@ -98,7 +98,8 @@ problem.C_desired_y = C_desired_y
 problem.reducedofs = 0  # delete dofs of elements that are close to zero in density, speeding up optimization
 solver = TopOptSolver(problem, len(constraints))
 
-x_opt = solver.optimize(x)
+# x_opt = solver.optimize(x)
+x_opt = solver.optimize2(x, 50, len(constraints))
 
 # save optimized density values to txt file
 with open(file_path, 'w') as file:

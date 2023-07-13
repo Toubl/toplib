@@ -8,6 +8,7 @@ from topopt.solvers import OCSolver
 from topopt.filters import DensityBasedFilter
 from topopt.guis import GUI
 from voxel import x_to_stl
+import matlab.engine
 
 def calculate_strain_energy(cxx, cxy, cyy, M, y):
     F = numpy.zeros((6, 1))
@@ -36,7 +37,7 @@ def read_array_from_file(file_path):
             array.append(entry)
     return numpy.array(array).astype(numpy.float64)
 
-nelx, nely, nelz = 40, 20, 10  # Number of elements in the x y and z-direction
+nelx, nely, nelz = 20, 20, 20  # Number of elements in the x y and z-direction
 volfrac = 1  # Volume fraction for constraints
 penal = 3  # Penalty for SIMP
 rmin = 2  # Filter radius
@@ -67,15 +68,15 @@ bc.set_forces(F)
 
 #is there a C_desired_y or C_desired_z?
 desired_y = 1
-desired_z = 0
+desired_z = 1
 
 # Directly define desired Compliance matrix
-c_33 = 200
-c_43 = -50
-c_44 = 100
+c_33 = 5
+c_43 = -1.25
+c_44 = 2.5
 
 C_desired_y = numpy.array([[c_33, c_43], [c_43, c_44]])
-C_desired_z = numpy.array([[c_33, -c_43], [-c_43, c_44]])
+C_desired_z = numpy.array([[c_33, c_43], [c_43, c_44]])
 
 if numpy.linalg.det(C_desired_y) <= 0 or numpy.linalg.det(C_desired_z) <= 0:
     print('unfeasible matrix!')
@@ -118,10 +119,13 @@ topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 problem = MinMassProblem3(bc, penal, volfrac, topopt_filter, constraints, constraints_f, 0)
 problem.C_desired_y = C_desired_y
 problem.C_desired_z = C_desired_z
-problem.reducedofs = 0  # delete dofs of elements that are close to zero in density, speeding up optimization
+problem.reducedofs = 1  # delete dofs of elements that are close to zero in density, speeding up optimization
+problem.desired_y = desired_y
+problem.desired_z = desired_z
 solver = TopOptSolver(problem, len(constraints))
 
-x_opt = solver.optimize(x)
+# x_opt = solver.optimize(x)
+x_opt = solver.optimize2(x, 50, len(constraints))
 
 # save optimized density values to txt file
 with open(file_path, 'w') as file:

@@ -10,7 +10,7 @@ import cvxopt
 import cvxopt.cholmod
 
 from .boundary_conditions import BoundaryConditions
-from .utils import deleterowcol
+from .utils import deleterowcol, xy_to_id
 from topopt.filters import Filter
 from topopt.filters import DensityBasedFilter
 
@@ -259,8 +259,8 @@ class ElasticityProblem2(Problem):
         """
         super().__init__(bc, penalty, volfrac, filter)
         # Max and min stiffness
-        # self.Emin = 1e-9
-        self.Emin = 0
+        self.Emin = 1e-9
+        # self.Emin = 0
         self.Emax = 1.0
 
         # FE: Build the index vectors for the for coo matrix format.
@@ -445,8 +445,9 @@ class ElasticityProblem2(Problem):
               self.compute_young_moduli(xPhys)).flatten(order='F')
         K = scipy.sparse.coo_matrix(
             (sK, (self.iK, self.jK)), shape=(self.ndof, self.ndof))
-        K = self.RBE_interface(self.nelx, self.nely, K)
+        
         if remove_constrained:
+            K = self.RBE_interface(self.nelx, self.nely, K)
             # Remove constrained dofs from matrix and convert to coo
             # + 2 is because 2 dofs of master node have been added
             K = deleterowcol(K.tocsc(), self.fixed + 2, self.fixed + 2).tocoo()
@@ -743,8 +744,129 @@ class ElasticityProblem2(Problem):
         print("K_red:")
         print(K_red, '\n')
         return K_red, C_red
+    
+    def StaticCondensationInterfaces(self, K: scipy.sparse._coo.coo_matrix, nelx: int, nely: int) -> numpy.ndarray:
+        """
+        Apply static condensation to reduce K to boundary degrees of freedom
+        (Same process as Krischer 2022) - Name convention according to Guyan (1965)
 
+        Parameters
+        ----------
+        K:
+            Full stiffness matrix
 
+        Returns
+        -------
+            Condensed stiffness matrix
+
+        """
+        K = K.toarray() # Would be nice to handle all this with sparse matrices
+        
+        ############ Static condensation
+        # Find slave & master indexes -> master indexes are on the left (x=0) and right (x=nelx) boundaries
+        boundCoordsX = numpy.concatenate( (numpy.tile(0,nely+1),   numpy.tile(nelx,nely+1)) )
+        boundCoordsY = numpy.concatenate( (numpy.arange(0,nely+1), numpy.arange(0,nely+1))  )
+        
+        nodeIds = xy_to_id(boundCoordsX, boundCoordsY, nelx, nely)
+        keepDoFIds  = numpy.concatenate( (2*nodeIds,2*nodeIds+1) )
+        keepDoFIds.sort() # Since the nodeIds are sorted, but this gets lost when concatenating
+        ndofs = 2 * (nelx + 1) * (nely + 1)
+        allDoFIds = numpy.arange(ndofs)
+        delDoFIds = allDoFIds[ ~numpy.isin(allDoFIds, keepDoFIds) ] # DoFs that won't be kept
+        
+        # Build B and C
+        B = K[keepDoFIds[:, numpy.newaxis], delDoFIds]
+        C = K[delDoFIds[:, numpy.newaxis],  delDoFIds]
+        
+        # Compute Tg (transformation matrix)
+        Tg = numpy.zeros((len(allDoFIds),len(keepDoFIds)))
+        Tg[keepDoFIds,:] = numpy.eye(len(keepDoFIds))
+        Tg[delDoFIds,:]  = numpy.linalg.solve(-C,B.T)
+        
+        # Compute Kr = T'KT
+        Kg = Tg.T @ K @ Tg
+        
+        # Some test displacements to see if I get reasonable forces
+        # horz = numpy.array([1,0,1,0,1,0,1,0])
+        # vert = numpy.array([0,1,0,1,0,1,0,1])
+        # #rot  = numpy.array([1/6, -1, -1/6, -1, 1/6, 1, -1/6, 1])
+        # #rot  = numpy.array([-0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5]) # Planar rotation for 1-element mesh
+        # rot  = numpy.array([-0.5, -1, 0.5, -1, -0.5, 1, 0.5, 1]) # Planar rotation for 2x1-element mesh
+        # #rot  = numpy.array([-0.5, -3, 0.5, -3, -0.5, 3, 0.5, 3]) # Planar rotation for 6x1-elements mesh
+        
+        # f1 = numpy.dot(Kg,horz)
+        # f2 = numpy.dot(Kg,vert)
+        # f3 = numpy.dot(Kg,rot)
+        
+        return Tg, Kg
+    
+    def KinematicCondensationInterfaces(self, Kg: numpy.ndarray) -> numpy.ndarray:
+        """
+        Apply kinematic condensation. Master nodes located at interface midpoints
+        (Same process as Krischer 2022)
+
+        Parameters
+        ----------
+        Kg:
+            Guyan-Reduced stiffness matrix
+
+        Returns
+        -------
+            Kinematic-Condensed stiffness matrix (4x4)
+
+        """
+        
+        # New nodes will be located at interface midpoints, and their DoFs will be
+        # vertical displacement and planar rotation.
+        
+        # Get relative vertical distances from interface midpoints to interface nodes.
+        nDofsOneSide = Kg.shape[0]/2
+        nNodesOneSide = nDofsOneSide/2
+        y0 = (nNodesOneSide-1)/2 # Half the height of the design domain
+        dy = y0 - numpy.arange(0, nNodesOneSide) # Relative node heights (one side)
+        dx = 0 # Relative horizontal distances (same as Kri2021)
+        
+        n_mdofs = 4
+        
+        Cm = numpy.zeros((int(Kg.shape[0]), n_mdofs))
+        nNodes = int(Kg.shape[0]/2)
+        for i in range(0, nNodes, 2):
+
+            i_dy = int(i/2)
+            # Upper half (left side of design domain)
+            Cm[i:i+2,:] = [[0,  -dy[i_dy], 0, 0],
+                           [1,       dx,   0, 0]] # Cols refer to u1, phi1, u2, phi2
+            # Lower half (right side of design domain)
+            Cm[i+nNodes:i+2+nNodes,:] = [[0, 0, 0, -dy[i_dy]],
+                                         [0, 0, 1,      -dx]]
+            
+        Tr = numpy.vstack((numpy.eye(n_mdofs),Cm))
+        
+        Kg_ = numpy.zeros((Kg.shape[0]+4,Kg.shape[0]+4))
+        Kg_[4:,4:] += Kg 
+        Kgr = Tr.T @ Kg_ @ Tr
+        Tr = Tr[4:,:]
+        # # Rid body modes to test if Kgr*phi = 0
+        # l = 20+6 # horizontal length of component (=nelx)
+        # phi1 = numpy.array([1, 0, 1, 0]).reshape((4,1))
+        # phi2 = numpy.array([-1, 2/l, 1, 2/l]).reshape((4,1))
+        # f1 = numpy.dot(Kgr,phi1) # both modes should give zero forces
+        # f2 = numpy.dot(Kgr,phi2)
+        
+        # # Test if equations from Kri2021 hold
+        # K11 = Kgr[0,0]
+        # K22 = Kgr[1,1]
+        # K44 = Kgr[3,3]
+        # K33d = K11 - Kgr[0,0]
+        # K31d = -K11 - (-Kgr[0,0])
+        # K21d = (K11*l**2+K22-K44)/(2*l) - Kgr[1,0]
+        # K41d = (K11*l**2-K22+K44)/(2*l) - Kgr[3,0]
+        # K32d = -(K11*l**2+K22-K44)/(2*l) - Kgr[2,1]
+        # K42d = (K11*l**2-K22-K44)/(2) - Kgr[3,1]
+        # K43d = -(K11*l**2-K22+K44)/(2*l) - Kgr[3,2]
+        
+        return Tr, Kgr
+    
 class ElasticityProblem3(Problem):
     """
     Abstract elasticity topology optimization problem.
@@ -2162,6 +2284,86 @@ class MinMassProblem3(ElasticityProblem3):
 
         self.f[:6] = F
 
+class MinMassRedKentries2(ElasticityProblem2):
+    r"""
+    Topology optimization problem to minimize mass given [4x4] reduced stiffness matrix entries
+    """
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, constraints: numpy.ndarray, constraints_f, gui):
+        super().__init__(bc, penalty, volfrac, filter, constraints, constraints_f, gui)
+        self.Kreq = constraints[0:3] # Required stiffness entries (k00, k11, k33)
+        
+    def objective_function(
+            self, x: numpy.ndarray, grad: numpy.ndarray) -> float:
+        """
+        
+        Computes volume and sets derivatives in-place
+        
+        Parameters
+        ----------
+        result:
+            The design variables.
+        grad:
+            The gradient of obj wrt the design variables
+
+        Returns
+        -------
+        float
+            Volume
+
+        """
+        return self.compute_volume(x, grad[:])
+
+    def constraints_function(self, result, x, grad):
+        """
+        Compute m problem constraints and their gradients
+        
+        Parameters
+        ----------
+        result:
+            The value of the nonlinear constraints (to be set in-place)
+        x:
+            The design variables.
+        grad:
+            The gradient of the nonlinear constraints (to be set in-place)
+    
+        """
+        # Generate xPhys
+        self.filter_variables(x)
+        
+        if self.gui != 0:
+            self.gui.update(self.xPhys)
+        
+        K = self.build_K(self.xPhys,remove_constrained=False)
+        
+        Tg, Kg = self.StaticCondensationInterfaces(K, self.nelx, self.nely) # Guyan (Static condensation)
+        
+        Tr, Kgr = self.KinematicCondensationInterfaces(Kg) # Kinematic condensation
+
+        K00, K11, K33 = self.Kreq[:]
+        eps = 1e-2
+        result[:] = [(K00 - Kgr[0,0])/K00-eps, (K11 - Kgr[1,1])/K11-eps, (K33 - Kgr[3,3])/K33-eps, (Kgr[0,0]-K00)/K00-eps, (Kgr[1,1]-K11)/K11-eps, (Kgr[3,3]-K33)/K33-eps]
+        # result[:] = [(K00 - Kgr[0,0])/K00, (K11 - Kgr[1,1])/K11, (K33 - Kgr[3,3])/K33]
+        # print(result)
+        # print([Kgr[0,0], Kgr[1,1], Kgr[3,3]])
+        # Gradients
+        Tgr = Tg @ Tr
+        if grad.size > 0 :
+            grad[:] = 0
+            dE = numpy.empty(self.xPhys.shape)
+            self.compute_young_moduli(self.xPhys, dE) # here dE gets allocated
+            for i in range(self.nel):
+                
+                edof_i = self.edofMat[i,:]
+                
+                iK = numpy.kron(edof_i, numpy.ones((8, 1))).flatten()
+                jK = numpy.kron(edof_i, numpy.ones((1, 8))).flatten()
+                dK = scipy.sparse.csc_array((dE[i]*self.KE.flatten(), (iK, jK)), shape=(self.ndof,self.ndof)) # sparse format
+                dKgr = Tgr.transpose() @ dK @ Tgr
+                grad[:,i] = [-dKgr[0,0]/K00, -dKgr[1,1]/K11, -dKgr[3,3]/K33, dKgr[0,0]/K00, dKgr[1,1]/K11, dKgr[3,3]/K33]  
+                # if i%1000 == 0:
+                    # print(i) 
+             
+        self.filter.filter_constraint_sensitivities(self.xPhys, grad)
 
 class HarmonicLoadsProblem(ElasticityProblem2):
     r"""

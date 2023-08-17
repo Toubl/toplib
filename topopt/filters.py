@@ -246,3 +246,19 @@ class DensityBasedFilter(Filter):
 
         """
         dv[:] = numpy.asarray(self.H * dv[numpy.newaxis].T / self.Hs)[:, 0]
+
+    def filter_constraint_sensitivities(
+            self, xPhys: numpy.ndarray, grad: numpy.ndarray) -> None:
+        """
+        Filter derivative of the volume.
+
+        Parameters
+        ----------
+        xPhys:
+            The filtered density values.
+        dv:
+            The filtered volume sensitivities to be computed.
+
+        """
+        for i in range(grad.shape[0]):
+            grad[i,:] = numpy.asarray(self.H * (grad[i,:][numpy.newaxis].T / self.Hs))[:, 0]

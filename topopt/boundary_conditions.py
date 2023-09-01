@@ -100,6 +100,7 @@ class FixedBeamBoundaryConditions(BoundaryConditions):
         """:obj:`numpy.ndarray`: Force vector in the top center."""
         f = self.f
         return f
+    
     def set_forces(self, F):
         self.f = numpy.zeros((self.ndof - 2 * 3 * (self.nely + 1) * (self.nelz + 1) + 6, F.shape[1]))
         self.f[0:6, :] = F
@@ -115,18 +116,31 @@ class RedKentriesBoundaryConditions(BoundaryConditions):
 
     @property
     def forces(self):
-        """:obj:`numpy.ndarray`: Force vector in the middle right."""
-        return numpy.zeros((self.ndof, 1))
+        """:obj:`numpy.ndarray`: Force vector in the top center."""
+        f = self.f
+        return f
     
     @property
     def active_elements(self):
         """:obj:`numpy.ndarray`: Left and Right boundaries"""
-        left_bound  = numpy.arange(0,self.nely)
-        right_bound = numpy.arange(0,self.nely) + (self.nelx-1)*self.nely
-        return numpy.concatenate((left_bound,right_bound))
+        
+        if self.nelz > 1: # 3D-case
+            n_elems = self.nelx*self.nely*self.nelz
+            n_interfaceElems = self.nely*self.nelz
+            activeElems1 = numpy.arange(0, n_interfaceElems) # "Left" boundary Elems
+            activeElems2 = numpy.arange(n_elems-n_interfaceElems, n_elems) # "Right" boundary Elems
+            elms = numpy.concatenate((activeElems1,activeElems2))
+        else:
+            activeElems1  = numpy.arange(0,self.nely) # "Left" boundary Elems
+            activeElems2 = numpy.arange(0,self.nely) + (self.nelx-1)*self.nely # "Right" boundary Elems
+            elms = numpy.concatenate((activeElems1,activeElems2))
+        return elms
     
     def set_forces(self, F):
-        self.f = numpy.zeros((self.ndof - 2 * 3 * (self.nely + 1) * (self.nelz + 1) + 6, F.shape[1]))
+        if self.ndof - 2 * 3 * (self.nely + 1) * (self.nelz + 1) + 6 < 6:
+            self.f = numpy.zeros((6,1))
+        else: 
+            self.f = numpy.zeros((self.ndof - 2 * 3 * (self.nely + 1) * (self.nelz + 1) + 6, F.shape[1]))
         self.f[0:6, :] = F
         
 class MBBBeamBoundaryConditions(BoundaryConditions):

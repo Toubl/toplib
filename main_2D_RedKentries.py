@@ -12,8 +12,8 @@ title = pyfiglet.figlet_format("TopOpt", font="small", width=100)
 with open('utils/ascii_ose.txt') as f:
     ose=f.read()
 
-print(title)
-print(ose)
+# print(title)
+# print(ose)
 
 
 def read_array_from_file(file_path):
@@ -53,8 +53,8 @@ bc.set_forces(F)
 # stays empty for Compliance optimization
 # constraints = []
 # K00, K11, K33 = 1.9e9/8, 1.5e12/2.6, 1.5e12/2.9 # Gives a solution similar to left component kri2021
-# K00, K11, K33 = 1.9e9/8, 1.5e12/4, 1.5e12/100 # This seems to work pretty well for a mesh of 38, 13, 1
-K00, K11, K33 = 1.9e9/12, 1.5e12/8, 1.5e12/8
+K00, K11, K33 = 1.9e9/8, 1.5e12/4, 1.5e12/100 # This seems to work pretty well for a mesh of 38, 13, 1
+# K00, K11, K33 = 1.9e9/0.8, 1.5e12/0.8, 1.5e12/0.8
 constraints = numpy.array([K00, K11, K33, K00, K11, K33]) # Twice the same to generate the equality constraint from the negative and postivive side
 constraints_f = []
 
@@ -62,7 +62,7 @@ topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 
 # Problem to optimize given objective and constraints
 gui = GUI(bc, "Topology Optimization Example")
-domain_lens = [0.3*0.98+0.1, 0.098] # Kri 2021
+domain_lens = [0.3*0.98-0.0, 0.098] # Kri 2021
 joint_locs = [3e-3, 0] # Kri 2021
 problem = MinMassRedKentries2(bc, penal, volfrac, topopt_filter, constraints, constraints_f, gui, domain_lens, joint_locs) # Only pass Kreq if MinMassRedKentries problem
 problem.Emin = 10
@@ -73,6 +73,7 @@ solver = TopOptSolver(problem, len(constraints))
 
 x_opt = solver.optimize(x)
 
+print(solver.opt.last_optimize_result())
 
 # Calculate and display Compliance and stiffness matrix of reduced system
 # _, C_red = problem.compute_reduced_stiffness(x_opt)

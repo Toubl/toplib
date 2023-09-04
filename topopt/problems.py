@@ -370,6 +370,10 @@ class ElasticityProblem2(Problem):
                 # Compute Jacobian matrix
                 JacobianMatrix = numpy.dot(dShape, coordinates)
                 
+                if numpy.linalg.det(JacobianMatrix) == 0:
+                    print([length_x, length_y])
+                    print(JacobianMatrix)
+                
                 # Compute auxiliar matrix for construction of B-Operator
                 dNdx = numpy.linalg.inv(JacobianMatrix).dot(dShape)
                 
@@ -747,7 +751,7 @@ class ElasticityProblem2(Problem):
 
         self.filter.filter_volume_sensitivities(self.xPhys, grad[:])
 
-        print('Volume: ', self.xPhys.sum() / (self.nelx * self.nely * self.nelz), '\n')
+        # print('Volume: ', self.xPhys.sum() / (self.nelx * self.nely * self.nelz), '\n')
 
         return self.xPhys.sum()
 
@@ -2547,12 +2551,15 @@ class MinMassRedKentries2(ElasticityProblem2):
         Tg, Kg = self.StaticCondensationInterfaces(K, self.nelx, self.nely) # Guyan (Static condensation)
         
         Tr, Kgr = self.KinematicCondensationInterfaces(Kg) # Kinematic condensation
+                
+        # print(f"{numpy.round([Kgr[0,0], Kgr[1,1], Kgr[3,3]])}")
 
         K00, K11, K33 = self.Kreq[:]
+        
         eps = 1e-2
         result[:] = [(K00 - Kgr[0,0])/K00-eps, (K11 - Kgr[1,1])/K11-eps, (K33 - Kgr[3,3])/K33-eps, (Kgr[0,0]-K00)/K00-eps, (Kgr[1,1]-K11)/K11-eps, (Kgr[3,3]-K33)/K33-eps]
         # result[:] = [(K00 - Kgr[0,0])/K00, (K11 - Kgr[1,1])/K11, (K33 - Kgr[3,3])/K33]
-        print(result[0:3]*100)
+        # print(result[0:3]*100)
         # print([Kgr[0,0], Kgr[1,1], Kgr[3,3]])
         # Gradients
         Tgr = Tg @ Tr

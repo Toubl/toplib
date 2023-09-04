@@ -43,6 +43,7 @@ class TopOptSolver:
         self.opt.set_param('inner_maxeval', 2)
         self.opt.set_param('verbosity', 0)
         self.xPhys = numpy.ones(n)
+        self.n_constraints = n_constraints
 
         # set bounds on the value of x (0 ≤ x ≤ 1)
         self.opt.set_lower_bounds(numpy.zeros(n))

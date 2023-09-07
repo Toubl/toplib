@@ -260,12 +260,11 @@ class ElasticityProblem2(Problem):
         """
         super().__init__(bc, penalty, volfrac, filter)
         # Max and min stiffness
-        self.Emin = 1e-9
-        # self.Emin = 0
-        self.Emax = 1.0
-
+        self.Emin = 1e-9 # Don't set it to 0 because singularities
+        self.Emax = 1.0 # In this line, this should remain at E=1 to avoid scaling lk twice. Can be modified from main() after creating problem class instance.
+        
         # FE: Build the index vectors for the for coo matrix format.
-        self.nu = 0.3
+        self.nu = 0.33 # This has to be set to the desired value already from class creation (either here or setting it as additional input for __init__)
 
         # BC's and support (half MBB-beam)
         self.bc = bc
@@ -340,6 +339,8 @@ class ElasticityProblem2(Problem):
         """
         length_x = self.elen_x
         length_y = self.elen_y
+        # length_x = 1.0 # Test if I get the same element stiffness matrix as with the original function
+        # length_y = 1.0
         
         # Compute 3D constitutive matrix (linear isotropic continuum mechanics)
         C = E / (1 - nu**2) * numpy.array([[1,  nu,        0],
@@ -450,9 +451,12 @@ class ElasticityProblem2(Problem):
         return K
 
     def build_indices(self) -> None:
-        """Build the index vectors for the finite element coo matrix format."""
-        # self.KE = self.lk(E=self.Emax, nu=self.nu)
-        self.KE = self.lk_scaled(E=self.Emax, nu=self.nu)
+        """
+        Build the index vectors for the finite element coo matrix format.
+        This method is only called once (upon class instantiation).
+        """
+        # self.KE = self.lk(E=1.0, nu=self.nu)
+        self.KE = self.lk_scaled(E=1.0, nu=self.nu)
         self.edofMat = numpy.zeros((self.nelx * self.nely, 8), dtype=int)
         for elx in range(self.nelx):
             for ely in range(self.nely):
@@ -561,7 +565,7 @@ class ElasticityProblem2(Problem):
             xPhys[self.passive] = 0
         else:
             self.passive = scipy.sparse.csr_matrix(xPhys < 0)
-            self.Emin = 1e-9
+            # self.Emin = 1e-9
 
         # building stiffness matrix
         K = self.build_K(xPhys)
@@ -644,6 +648,7 @@ class ElasticityProblem2(Problem):
         F = numpy.insert(F, 2, np.tile(zeros_to_insert, (self.f.shape[1], 1)).T, axis=0)  # Insert zeros of fixed dofs
         F = self.T_r @ F  # retransform to inlude slave nodes
         u_m = F[:2]  # Displacement of master node
+        print(f'Master Vertical Disp: {u_m[0]}')
         F = F[2:]  # delete master node dofs
         new_u = F
         return new_u, u_m
@@ -861,10 +866,10 @@ class ElasticityProblem2(Problem):
         # Some test displacements to see if I get reasonable forces
         # horz = numpy.array([1,0,1,0,1,0,1,0])
         # vert = numpy.array([0,1,0,1,0,1,0,1])
-        # #rot  = numpy.array([1/6, -1, -1/6, -1, 1/6, 1, -1/6, 1])
-        # #rot  = numpy.array([-0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5]) # Planar rotation for 1-element mesh
+        #rot  = numpy.array([1/6, -1, -1/6, -1, 1/6, 1, -1/6, 1])
+        #rot  = numpy.array([-0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5]) # Planar rotation for 1-element mesh
         # rot  = numpy.array([-0.5, -1, 0.5, -1, -0.5, 1, 0.5, 1]) # Planar rotation for 2x1-element mesh
-        # #rot  = numpy.array([-0.5, -3, 0.5, -3, -0.5, 3, 0.5, 3]) # Planar rotation for 6x1-elements mesh
+        #rot  = numpy.array([-0.5, -3, 0.5, -3, -0.5, 3, 0.5, 3]) # Planar rotation for 6x1-elements mesh
         
         # f1 = numpy.dot(Kg,horz)
         # f2 = numpy.dot(Kg,vert)
@@ -1914,7 +1919,24 @@ class ComplianceProblem2(ElasticityProblem2):
     displacements, :math:`\mathbf{K}` is the striffness matrix, and :math:`V`
     is the volume.
     """
-
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, 
+                 constraints: numpy.ndarray, constraints_f, gui, domain_lens=None, joint_locs=None):
+        
+        if domain_lens==None:
+            # Element physical lengths in x and y
+            self.elen_x = 1.0
+            self.elen_y = 1.0
+        else:
+            # Element physical lengths in x and y
+            self.elen_x = domain_lens[0]/bc.nelx
+            self.elen_y = domain_lens[1]/bc.nely
+        
+        # # Locations of the interface joints with respect to interface midpoint (Don't think I need it here)
+        # self.joint_locx = joint_locs[0]
+        # self.joint_locy = joint_locs[1]
+        
+        super().__init__(bc, penalty, volfrac, filter, constraints, constraints_f, gui)
+        
     def objective_function(
             self, x: numpy.ndarray, dobj: numpy.ndarray) -> float:
         """
@@ -1950,7 +1972,7 @@ class ComplianceProblem2(ElasticityProblem2):
         if self.gui != 0:
             self.gui.update(self.xPhys)
 
-        print('Displacement: ', obj, '\n')
+        print('Compliance Energy: ', obj, '\n')
         print('elapsed_time', time.time() - start)
         return obj
 

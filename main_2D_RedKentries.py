@@ -26,7 +26,8 @@ def read_array_from_file(file_path):
 
 
 # nelx, nely, nelz = 48, 16, 1
-nelx, nely, nelz = 38, 13, 1 # This seems to work!!!
+# nelx, nely, nelz = 38, 13, 1 # This seems to work!!!
+nelx, nely, nelz = 5, 1, 1 # This seems to work!!!
 volfrac = 1.0  # Volume fraction for constraints
 penal = 3  # Penalty for SIMP
 rmin = 1.2
@@ -62,8 +63,11 @@ topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 
 # Problem to optimize given objective and constraints
 gui = GUI(bc, "Topology Optimization Example")
-domain_lens = [0.3*0.98-0.0, 0.098] # Kri 2021
-joint_locs = [3e-3, 0] # Kri 2021
+# domain_lens = [0.3*0.98-0.0, 0.098] # Kri 2021
+# domain_lens = [0.3*0.98-0.0, 0.098] # Kri 2021
+domain_lens = [2, 1] # Kri 2021
+# joint_locs = [3e-3, 0] # Kri 2021
+joint_locs = [0, 0] # Kri 2021
 problem = MinMassRedKentries2(bc, penal, volfrac, topopt_filter, constraints, constraints_f, gui, domain_lens, joint_locs) # Only pass Kreq if MinMassRedKentries problem
 problem.Emin = 10
 problem.Emax = 70e9

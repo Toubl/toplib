@@ -25,10 +25,14 @@ def read_array_from_file(file_path):
     return numpy.array(array).astype(numpy.float64)
 
 
-# nelx, nely, nelz = 48, 16, 1
+nelx, nely, nelz = 48, 16, 1
+nelx = 16 # 82 for max length and 16 for min length
+elem_lenx = 6.125 # mm
+print(f'Domain length = {nelx*elem_lenx}')
+elem_leny = 6.125 # mm
 # nelx, nely, nelz = 38, 13, 1 # This seems to work!!!
-nelx, nely, nelz = 5, 1, 1 # This seems to work!!!
-volfrac = 1.0  # Volume fraction for constraints
+# nelx, nely, nelz = 5, 1, 1
+volfrac = 1.0  # Volume fraction
 penal = 3  # Penalty for SIMP
 rmin = 1.2
 # Initial solution
@@ -53,9 +57,7 @@ bc.set_forces(F)
 # values and load cases of constraints in list
 # stays empty for Compliance optimization
 # constraints = []
-# K00, K11, K33 = 1.9e9/8, 1.5e12/2.6, 1.5e12/2.9 # Gives a solution similar to left component kri2021
-K00, K11, K33 = 1.9e9/8, 1.5e12/4, 1.5e12/100 # This seems to work pretty well for a mesh of 38, 13, 1
-# K00, K11, K33 = 1.9e9/0.8, 1.5e12/0.8, 1.5e12/0.8
+K00, K11, K33 = 1.8e4, 3.5e6, 3.5e6
 constraints = numpy.array([K00, K11, K33, K00, K11, K33]) # Twice the same to generate the equality constraint from the negative and postivive side
 constraints_f = []
 
@@ -63,14 +65,14 @@ topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 
 # Problem to optimize given objective and constraints
 gui = GUI(bc, "Topology Optimization Example")
-# domain_lens = [0.3*0.98-0.0, 0.098] # Kri 2021
-# domain_lens = [0.3*0.98-0.0, 0.098] # Kri 2021
-domain_lens = [2, 1] # Kri 2021
-# joint_locs = [3e-3, 0] # Kri 2021
-joint_locs = [0, 0] # Kri 2021
+domain_lens = [nelx*elem_lenx, 98] # Kri 2021
+# domain_lens = [450, 98] # Kri 2021
+# domain_lens = [2, 1] # 
+joint_locs = [3, 0] # Kri 2021
+# joint_locs = [0, 0] # 
 problem = MinMassRedKentries2(bc, penal, volfrac, topopt_filter, constraints, constraints_f, gui, domain_lens, joint_locs) # Only pass Kreq if MinMassRedKentries problem
 problem.Emin = 10
-problem.Emax = 70e9
+problem.Emax = 70e3
 problem.nu = 0.33
 problem.reducedofs = 0  # delete dofs of elements that are close to zero in density, speeding up optimization
 solver = TopOptSolver(problem, len(constraints))
@@ -82,9 +84,9 @@ print(solver.opt.last_optimize_result())
 # Calculate and display Compliance and stiffness matrix of reduced system
 # _, C_red = problem.compute_reduced_stiffness(x_opt)
 # display optimized topology
-x_to_stl(nelx, nely, nelz, 0.1, x_opt, 'output.stl')
+# x_to_stl(nelx, nely, nelz, 0.1, x_opt, 'output.stl')
 
 # save optimized density values to txt file
-with open(file_path, 'w') as file:
-    for item in x_opt:
-        file.write(str(item) + '\n')
+# with open(file_path, 'w') as file:
+#     for item in x_opt:
+#         file.write(str(item) + '\n')

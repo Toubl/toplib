@@ -756,7 +756,7 @@ class ElasticityProblem2(Problem):
 
         self.filter.filter_volume_sensitivities(self.xPhys, grad[:])
 
-        # print('Volume: ', self.xPhys.sum() / (self.nelx * self.nely * self.nelz), '\n')
+        # print('Vfrac: ', self.xPhys.sum() / (self.nelx * self.nely * self.nelz), '\n')
 
         return self.xPhys.sum()
 

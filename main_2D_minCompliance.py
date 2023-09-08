@@ -66,7 +66,7 @@ x_opt = solver.optimize(x)
 # Calculate and display Compliance and stiffness matrix of reduced system
 # _, C_red = problem.compute_reduced_stiffness(x_opt)
 # display optimized topology
-# x_to_stl(nelx, nely, nelz, 0.1, x_opt, 'output.stl')
+x_to_stl(nelx, nely, nelz, 0.1, x_opt, 'output.stl')
 
 # save optimized density values to txt file
 # with open(file_path, 'w') as file:

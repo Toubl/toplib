@@ -528,7 +528,7 @@ class ElasticityProblem2(Problem):
             # + 2 is because 2 dofs of master node have been added
             K = deleterowcol(K.tocsc(), self.fixed + 2, self.fixed + 2).tocoo()
         return K
-
+    
     def compute_displacements(self, xPhys: numpy.ndarray) -> numpy.ndarray:
         """
         Compute the displacements given the densities.
@@ -822,7 +822,7 @@ class ElasticityProblem2(Problem):
         print(K_red, '\n')
         return K_red, C_red
     
-    def StaticCondensationInterfaces(self, K: scipy.sparse._coo.coo_matrix, nelx: int, nely: int) -> numpy.ndarray:
+    def StaticCondensationInterfaces(self, K: scipy.sparse._csr.csr_matrix) -> scipy.sparse.csr_matrix:
         """
         Apply static condensation to reduce K to boundary degrees of freedom
         (Same process as Krischer 2022) - Name convention according to Guyan (1965)
@@ -837,31 +837,36 @@ class ElasticityProblem2(Problem):
             Condensed stiffness matrix
 
         """
-        K = K.toarray() # Would be nice to handle all this with sparse matrices
         
-        ############ Static condensation
-        # Find slave & master indexes -> master indexes are on the left (x=0) and right (x=nelx) boundaries
-        boundCoordsX = numpy.concatenate( (numpy.tile(0,nely+1),   numpy.tile(nelx,nely+1)) )
-        boundCoordsY = numpy.concatenate( (numpy.arange(0,nely+1), numpy.arange(0,nely+1))  )
-        
-        nodeIds = xy_to_id(boundCoordsX, boundCoordsY, nelx, nely)
-        keepDoFIds  = numpy.concatenate( (2*nodeIds,2*nodeIds+1) )
-        keepDoFIds.sort() # Since the nodeIds are sorted, but this gets lost when concatenating
-        ndofs = 2 * (nelx + 1) * (nely + 1)
-        allDoFIds = numpy.arange(ndofs)
-        delDoFIds = allDoFIds[ ~numpy.isin(allDoFIds, keepDoFIds) ] # DoFs that won't be kept
+        # K = K.tocsr() # In coo format you can't acces elements. Also, I think this is getting modified in-place because by default copy=false
         
         # Build B and C
-        B = K[keepDoFIds[:, numpy.newaxis], delDoFIds]
-        C = K[delDoFIds[:, numpy.newaxis],  delDoFIds]
+        B = K[self.keepDoFIds[:, numpy.newaxis], self.delDoFIds]
+        C = K[self.delDoFIds[:, numpy.newaxis],  self.delDoFIds]
         
-        # Compute Tg (transformation matrix)
-        Tg = numpy.zeros((len(allDoFIds),len(keepDoFIds)))
-        Tg[keepDoFIds,:] = numpy.eye(len(keepDoFIds))
-        Tg[delDoFIds,:]  = numpy.linalg.solve(-C,B.T)
+        # Compute Tg with sparse formats v1
+        # Tg = scipy.sparse.lil_matrix((len(allDoFIds),len(keepDoFIds)))
+        # ii = numpy.arange(len(keepDoFIds),dtype=int)
+        # Tg[keepDoFIds,:] = scipy.sparse.csr_matrix( (numpy.ones_like(keepDoFIds), (ii,ii)) ) # The identity matrix part
+        # Tg[delDoFIds,:]  = scipy.sparse.linalg.spsolve(-C,B.T.tocsc())
+        # Tg = Tg.tocsr()
         
-        # Compute Kr = T'KT
-        Kg = Tg.T @ K @ Tg
+        # Compute Tg with sparse formats v2
+        ii = numpy.arange(len(self.keepDoFIds)//2,dtype=int)
+        # ii_up = ii[:]
+        Tg_master_up   = scipy.sparse.csr_matrix( (numpy.ones(len(self.keepDoFIds)//2), (ii,ii)), shape=(len(self.keepDoFIds)//2,len(self.keepDoFIds)) ) # The upper identity matrix part
+        Tg_slave       = scipy.sparse.linalg.spsolve(-C,B.T.tocsc()) # tocsc because otherwise there's a warning on performance issues. Maybe I can address this better....
+        Tg_master_down = scipy.sparse.csr_matrix( (numpy.ones(len(self.keepDoFIds)//2), (ii,ii+len(self.keepDoFIds)//2)), shape=(len(self.keepDoFIds)//2,len(self.keepDoFIds)) ) # The lower identity matrix part
+        Tg = scipy.sparse.vstack([Tg_master_up, Tg_slave, Tg_master_down])
+        
+        
+        # Build Tg without sparse format
+        # Tg = numpy.zeros((len(allDoFIds),len(keepDoFIds)))
+        # Tg[keepDoFIds,:] = numpy.eye(len(keepDoFIds))
+        # Tg[delDoFIds,:]  = scipy.sparse.linalg.spsolve(-C,B.T).toarray()
+        
+        # Compute Kr = T'KT -> I do this after the function call
+        # Kg = Tg.T @ K @ Tg
         
         # Some test displacements to see if I get reasonable forces
         # horz = numpy.array([1,0,1,0,1,0,1,0])
@@ -875,9 +880,9 @@ class ElasticityProblem2(Problem):
         # f2 = numpy.dot(Kg,vert)
         # f3 = numpy.dot(Kg,rot)
         
-        return Tg, Kg
+        return Tg
     
-    def KinematicCondensationInterfaces(self, Kg: numpy.ndarray) -> numpy.ndarray:
+    def KinematicCondensationInterfaces(self) -> scipy.sparse.csr_matrix:
         """
         Apply kinematic condensation. Master nodes located at interface midpoints
         (Same process as Krischer 2022)
@@ -897,16 +902,16 @@ class ElasticityProblem2(Problem):
         # vertical displacement and planar rotation.
         
         # Get relative vertical distances from interface midpoints to interface nodes.
-        nDofsOneSide = Kg.shape[0]/2
-        nNodesOneSide = nDofsOneSide/2
+        nNodesOneSide = self.nely+1
         y0 = (nNodesOneSide-1)/2 # Half the height of the design domain
-        dy = y0 - numpy.arange(0, nNodesOneSide) # Relative node heights (one side)
+        dy = (y0 - numpy.arange(0, nNodesOneSide))*self.elen_y # Relative node heights (one side)
         dx = self.joint_locx # Relative horizontal distances (same as Kri2021)
         
+        n_sdofs = nNodesOneSide*2*2
         n_mdofs = 4
         
-        Cm = numpy.zeros((int(Kg.shape[0]), n_mdofs))
-        nNodes = int(Kg.shape[0]/2)
+        Cm = numpy.zeros((int(n_sdofs), n_mdofs))
+        nNodes = nNodesOneSide*2
         for i in range(0, nNodes, 2):
 
             i_dy = int(i/2)
@@ -917,12 +922,13 @@ class ElasticityProblem2(Problem):
             Cm[i+nNodes:i+2+nNodes,:] = [[0, 0, 0, -dy[i_dy]],
                                          [0, 0, 1,      -dx]]
             
-        Tr = numpy.vstack((numpy.eye(n_mdofs),Cm))
+        # (!!!!!) This stuff below is how it "should" be (see Till's notes), but in practice only Cm is necessary -> Cm=Tr
+        # Tr = numpy.vstack((numpy.eye(n_mdofs),Cm))
+        # Kg_ = numpy.zeros((Kg.shape[0]+4,Kg.shape[0]+4))
+        # Kg_[4:,4:] += Kg 
+        # Kgr = Tr.T @ Kg_ @ Tr
+        # Tr = Tr[4:,:]
         
-        Kg_ = numpy.zeros((Kg.shape[0]+4,Kg.shape[0]+4))
-        Kg_[4:,4:] += Kg 
-        Kgr = Tr.T @ Kg_ @ Tr
-        Tr = Tr[4:,:]
         # # Rid body modes to test if Kgr*phi = 0
         # l = 20+6 # horizontal length of component (=nelx)
         # phi1 = numpy.array([1, 0, 1, 0]).reshape((4,1))
@@ -942,7 +948,7 @@ class ElasticityProblem2(Problem):
         # K42d = (K11*l**2-K22-K44)/(2) - Kgr[3,1]
         # K43d = -(K11*l**2-K22+K44)/(2*l) - Kgr[3,2]
         
-        return Tr, Kgr
+        return Cm
     
 class ElasticityProblem3(Problem):
     """
@@ -2524,9 +2530,24 @@ class MinMassRedKentries2(ElasticityProblem2):
         super().__init__(bc, penalty, volfrac, filter, constraints, constraints_f, gui)
         
         self.Kreq = constraints[0:3] # Required stiffness entries (k00, k11, k33)
+        self.keepDoFIds, self.delDoFIds = self.buildStaticCondensationIndices()
+        self.Tr = self.KinematicCondensationInterfaces() # Transformation matrix for kinematic condensation (stays constant for all iterations)     
         
+    def buildStaticCondensationIndices(self):
         
+        ############ Static condensation
+        # Find slave & master indexes -> master indexes are on the left (x=0) and right (x=nelx) boundaries
+        boundCoordsX = numpy.concatenate( (numpy.tile(0,self.nely+1),   numpy.tile(self.nelx,self.nely+1)) )
+        boundCoordsY = numpy.concatenate( (numpy.arange(0,self.nely+1), numpy.arange(0,self.nely+1))  )
         
+        nodeIds = xy_to_id(boundCoordsX, boundCoordsY, self.nelx, self.nely)
+        keepDoFIds  = numpy.concatenate( (2*nodeIds,2*nodeIds+1) )
+        keepDoFIds.sort() # Since the nodeIds are sorted, but this gets lost when concatenating
+        ndofs = 2 * (self.nelx + 1) * (self.nely + 1)
+        allDoFIds = numpy.arange(ndofs)
+        delDoFIds = allDoFIds[ ~numpy.isin(allDoFIds, keepDoFIds) ] # DoFs that won't be kept
+        return keepDoFIds, delDoFIds
+    
     def objective_function(
             self, x: numpy.ndarray, grad: numpy.ndarray) -> float:
         """
@@ -2568,15 +2589,27 @@ class MinMassRedKentries2(ElasticityProblem2):
         if self.gui != 0:
             self.gui.update(self.xPhys)
         
-        K = self.build_K(self.xPhys,remove_constrained=False)
+        K = self.build_K(self.xPhys,remove_constrained=False).tocsr()
         
-        Tg, Kg = self.StaticCondensationInterfaces(K, self.nelx, self.nely) # Guyan (Static condensation)
+        # t0_Kgr = time.perf_counter()
         
-        Tr, Kgr = self.KinematicCondensationInterfaces(Kg) # Kinematic condensation
-                
+        Tg = self.StaticCondensationInterfaces(K) # Guyan (Static condensation)
+        Tr = self.Tr # Kinematic condensation
+        Tgr = Tg @ Tr
+        Tgr_t = Tgr.transpose()
+        Kgr = Tgr_t @ K @ Tgr
+        
         # print(f"{numpy.round([Kgr[0,0], Kgr[1,1], Kgr[3,3]])}")
 
         K00, K11, K33 = self.Kreq[:]
+        
+        # t1_Kgr = time.perf_counter()
+        # print(f'Constraint computation time: {t1_Kgr-t0_Kgr} second(s)')
+        
+        # Tgr = Tgr.toarray()
+        # Tgr_t = Tgr_t.toarray()
+        
+        # t0_grad = time.perf_counter()
         
         eps = 1e-2
         result[:] = [(K00 - Kgr[0,0])/K00-eps, (K11 - Kgr[1,1])/K11-eps, (K33 - Kgr[3,3])/K33-eps, (Kgr[0,0]-K00)/K00-eps, (Kgr[1,1]-K11)/K11-eps, (Kgr[3,3]-K33)/K33-eps]
@@ -2584,23 +2617,35 @@ class MinMassRedKentries2(ElasticityProblem2):
         # print(result[0:3]*100)
         # print([Kgr[0,0], Kgr[1,1], Kgr[3,3]])
         # Gradients
-        Tgr = Tg @ Tr
         if grad.size > 0 :
             grad[:] = 0
             dE = numpy.empty(self.xPhys.shape)
             self.compute_young_moduli(self.xPhys, dE) # here dE gets allocated
+            
+            # I tried to vectorize the for loop but scipy does not allow 3D sparse arrays
+            # iK = numpy.kron(self.edofMat, numpy.ones((8, 1))).flatten()
+            # jK = numpy.kron(self.edofMat, numpy.ones((1, 8))).flatten()
+            # kk = numpy.kron(numpy.arange(self.nel), numpy.ones((1,8*8))).flatten() # This index has 64 entries for each "slice" of the final dK matrix corresponding to each element
+            # KE_resh = self.KE[:,:,numpy.newaxis]
+            # dK = scipy.sparse.csr_array(((dE*KE_resh).flatten(), (iK, jK, kk)), shape=(self.ndof,self.ndof,self.nel)) # sparse format
+            # dKgr = Tgr_t @ dK @ Tgr
+            # grad[:,i] = [-dKgr[0,0]/K00, -dKgr[1,1]/K11, -dKgr[3,3]/K33, dKgr[0,0]/K00, dKgr[1,1]/K11, dKgr[3,3]/K33]  
+            # if i%1000 == 0:
+                # print(i) 
+            
             for i in range(self.nel):
                 
                 edof_i = self.edofMat[i,:]
                 
                 iK = numpy.kron(edof_i, numpy.ones((8, 1))).flatten()
                 jK = numpy.kron(edof_i, numpy.ones((1, 8))).flatten()
-                dK = scipy.sparse.csc_array((dE[i]*self.KE.flatten(), (iK, jK)), shape=(self.ndof,self.ndof)) # sparse format
-                dKgr = Tgr.transpose() @ dK @ Tgr
+                dK = scipy.sparse.csr_array((dE[i]*self.KE.flatten(), (iK, jK)), shape=(self.ndof,self.ndof)) # sparse format
+                dKgr = Tgr_t @ dK @ Tgr
                 grad[:,i] = [-dKgr[0,0]/K00, -dKgr[1,1]/K11, -dKgr[3,3]/K33, dKgr[0,0]/K00, dKgr[1,1]/K11, dKgr[3,3]/K33]  
-                # if i%1000 == 0:
-                    # print(i) 
-             
+        
+        # t1_grad = time.perf_counter()        
+        # print(f'Gradient computation time: {t1_grad-t0_grad} second(s)')
+
         self.filter.filter_constraint_sensitivities(self.xPhys, grad)
 
 class MinMassRedKentries3(ElasticityProblem3):

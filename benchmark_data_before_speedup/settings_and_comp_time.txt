@@ -1,0 +1,12 @@
+Computer was plugged in, GUI on
+nelx, nely, nelz = 48, 16, 1
+Kgr_target: [		    1e3, 	  	4e7, 		   4e7]
+Kgr_real:   [1009.9797611197891, 39600125.578805625, 39600125.57880429]
+Constraints: [-1.99797611e+00 -3.13947014e-04 -3.13947011e-04]
+Computation time: 55.03 second(s)
+Exit code: 3
+x_phys.sum() outputs 551.23 -> 
+Volfrac = 551.23/(nel) = 0.71
+eVol = elenx*eleny*elenz = 6.125*6.125*1 = 37.51 mm3
+Vol = eVol*nel*Volfrac = 20453.45 mm3
+mass=vol*rho = Vol*2700*1e-9 kg = 0.055 kg

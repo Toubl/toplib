@@ -16,7 +16,7 @@ from topopt.problems import Problem
 class TopOptSolver:
     """Solver for topology optimization problems using NLopt's MMA solver."""
 
-    def __init__(self, problem: Problem, n_constraints, maxeval=150, ftol_rel=1e-4):
+    def __init__(self, problem: Problem, n_constraints, maxeval=500, ftol_rel=1e-4):
         """
         Create a solver to solve the problem.
 

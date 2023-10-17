@@ -40,7 +40,7 @@ class TopOptSolver:
 
         n = problem.nelx * problem.nely * problem.nelz
         self.opt = nlopt.opt(nlopt.LD_MMA, n)
-        self.opt.set_param('inner_maxeval', 2)
+        self.opt.set_param('inner_maxeval', 10)
         self.opt.set_param('verbosity', 0)
         self.xPhys = numpy.ones(n)
         self.n_constraints = n_constraints

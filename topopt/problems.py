@@ -2610,10 +2610,10 @@ class MinMassRedKentries2(ElasticityProblem2):
         
         # t0_grad = time.perf_counter()
         
-        # eps = 1e-2
+        eps = 1e-2
         # eps = 5e-2
-        # result[:] = [(K00 - Kgr[0,0])/K00-eps, (K11 - Kgr[1,1])/K11-eps, (K33 - Kgr[3,3])/K33-eps, (Kgr[0,0]-K00)/K00-eps, (Kgr[1,1]-K11)/K11-eps, (Kgr[3,3]-K33)/K33-eps]
-        result[:] = [(K00 - Kgr[0,0])/K00, (K11 - Kgr[1,1])/K11, (K33 - Kgr[3,3])/K33]
+        result[:] = [(K00 - Kgr[0,0])/K00-eps, (K11 - Kgr[1,1])/K11-eps, (K33 - Kgr[3,3])/K33-eps, (Kgr[0,0]-K00)/K00-eps, (Kgr[1,1]-K11)/K11-eps, (Kgr[3,3]-K33)/K33-eps]
+        # result[:] = [(K00 - Kgr[0,0])/K00, (K11 - Kgr[1,1])/K11, (K33 - Kgr[3,3])/K33]
         # print(result)
         # print([Kgr[0,0], Kgr[1,1], Kgr[3,3]])
         # Gradients
@@ -2641,8 +2641,8 @@ class MinMassRedKentries2(ElasticityProblem2):
                 jK = numpy.kron(edof_i, numpy.ones((1, 8))).flatten()
                 dK = scipy.sparse.csr_array((dE[i]*self.KE.flatten(), (iK, jK)), shape=(self.ndof,self.ndof)) # sparse format
                 dKgr = Tgr_t @ dK @ Tgr
-                # grad[:,i] = [-dKgr[0,0]/K00, -dKgr[1,1]/K11, -dKgr[3,3]/K33, dKgr[0,0]/K00, dKgr[1,1]/K11, dKgr[3,3]/K33]  
-                grad[:,i] = [-dKgr[0,0]/K00, -dKgr[1,1]/K11, -dKgr[3,3]/K33]
+                grad[:,i] = [-dKgr[0,0]/K00, -dKgr[1,1]/K11, -dKgr[3,3]/K33, dKgr[0,0]/K00, dKgr[1,1]/K11, dKgr[3,3]/K33]  
+                # grad[:,i] = [-dKgr[0,0]/K00, -dKgr[1,1]/K11, -dKgr[3,3]/K33]
         
         # t1_grad = time.perf_counter()        
         # print(f'Gradient computation time: {t1_grad-t0_grad} second(s)')

@@ -12,14 +12,15 @@ import numpy
 import nlopt
 import matlab.engine
 import keyboard
-
+import time
+import scipy.io
 
 from topopt.problems import Problem
 
 class TopOptSolver:
     """Solver for topology optimization problems using NLopt's MMA solver."""
 
-    def __init__(self, problem: Problem, n_constraints, maxeval=50, ftol_rel=1e-6):
+    def __init__(self, problem: Problem, n_constraints, maxeval=618, ftol_rel=1e-6):
         """
         Create a solver to solve the problem.
 
@@ -53,6 +54,7 @@ class TopOptSolver:
 
         # set stopping criteria
         self.maxeval = maxeval
+
         self.ftol_rel = ftol_rel
         self.xtol_rel = ftol_rel
 
@@ -127,7 +129,7 @@ class TopOptSolver:
         x = self.opt.optimize(x)
         return x
 
-    def optimize2(self, x: numpy.ndarray, n_iter, n_constraints) -> numpy.ndarray:
+    def optimize2(self, x: numpy.ndarray, n_constraints) -> numpy.ndarray:
         """
         Optimize the problem.
 
@@ -142,128 +144,143 @@ class TopOptSolver:
             The optimal value of x found.
 
         """
-        print('starting solver engine')
-        self.eng = matlab.engine.start_matlab()
-        print('started solver engine')
+        if not(hasattr(self, 'eng')):
+            print('starting solver engine')
+            self.eng = matlab.engine.start_matlab()
+            print('started solver engine')
         dobj = x.copy() * 0
         xold1 = x.copy()
         xold2 = x.copy()
         low = x.copy() * 0
         upp = x.copy() * 0 + 1
-        alpha = 1
+        alpha = 0.5
         if (n_constraints == 0):
             grad = numpy.zeros((1, len(x)))
             result = numpy.zeros((1,))
-            a_0 = 1
-            a_i = 0
-            c_i = 1000
-            d_i = 0
-            for i in range(n_iter):
+
+            for i in range(self.maxeval):
+                print(i)
                 obj = self.problem.objective_function(x, dobj)
                 self.problem.constraints_function(result, x, grad)
-                print('in MMA')
-                res = self.eng.mmasub(matlab.double([1]), matlab.double([len(x)]), i+1, matlab.double(x.tolist()), matlab.double((x*0).tolist()), matlab.double((x*0 + 1).tolist()),
-                                                                                        matlab.double(xold1.tolist()), matlab.double(xold2.tolist()), matlab.double([obj]), matlab.double(dobj.tolist()),
-                                                                                        matlab.double([result[0]]), matlab.double(grad.tolist()), matlab.double(low.tolist()), matlab.double(upp.tolist()), matlab.double([a_0]),
-                                                                                        matlab.double([a_i]), matlab.double([c_i]), matlab.double([d_i]))
-                print('out MMA')
+
+                data = {'m': 1, 'n': len(x), 'iter': i + 1, 'xval': x, 'xmin': x*0, 'xmax': x*0+1,
+                        'xold1': xold1, 'xold2': xold2, 'f0val': obj, 'df0dx': dobj, 'fval': result[:],
+                        'dfdx': grad, 'low': low, 'upp': upp, 'a0': 1, 'a': numpy.zeros((1, 1)),
+                        'c': numpy.zeros((1, 1))+1000, 'd': numpy.zeros((1, 1)),
+                        'nelx': self.problem.nelx, 'nely': self.problem.nely, 'nelz': self.problem.nelz}
+                if self.problem.process_number == 0:
+                    scipy.io.savemat('var.mat', data)
+                    self.eng.mmasub(nargout=0)
+                    mat_data = scipy.io.loadmat('res.mat')
+                elif self.problem.process_number == 1:
+                    scipy.io.savemat('var_1.mat', data)
+                    self.eng.mmasub_1(nargout=0)
+                    mat_data = scipy.io.loadmat('res_1.mat')
+                elif self.problem.process_number == 2:
+                    scipy.io.savemat('var_2.mat', data)
+                    self.eng.mmasub_2(nargout=0)
+                    mat_data = scipy.io.loadmat('res_2.mat')
+                elif self.problem.process_number == 3:
+                    scipy.io.savemat('var_3.mat', data)
+                    self.eng.mmasub_3(nargout=0)
+                    mat_data = scipy.io.loadmat('res_3.mat')
+                elif self.problem.process_number == 4:
+                    scipy.io.savemat('var_4.mat', data)
+                    self.eng.mmasub_4(nargout=0)
+                    mat_data = scipy.io.loadmat('res_4.mat')
+                elif self.problem.process_number == 5:
+                    scipy.io.savemat('var_5.mat', data)
+                    self.eng.mmasub_5(nargout=0)
+                    mat_data = scipy.io.loadmat('res_5.mat')
+                elif self.problem.process_number == 6:
+                    scipy.io.savemat('var_6.mat', data)
+                    self.eng.mmasub_6(nargout=0)
+                    mat_data = scipy.io.loadmat('res_6.mat')
+                elif self.problem.process_number == 7:
+                    scipy.io.savemat('var_7.mat', data)
+                    self.eng.mmasub_7(nargout=0)
+                    mat_data = scipy.io.loadmat('res_7.mat')
+
+                res = mat_data['res']
                 xold2 = xold1.copy()
                 xold1 = x.copy()
-                res = numpy.array(res)
                 x = res[:len(x), 0] * alpha + (1 - alpha) * x
                 low = res[len(x):len(x)*2, 0]
                 upp = res[len(x)*2:, 0]
 
-                if keyboard.is_pressed('s'):
+                if keyboard.is_pressed('5'):
                     print("Execution stopped by user.")
-                    return x
-
+                    return x, 0
 
         elif (n_constraints != 0):
             grad = numpy.zeros((n_constraints, len(x)))
             result = numpy.zeros((n_constraints,))
-            for i in range(n_iter):
+            for i in range(self.maxeval):
                 obj = self.problem.objective_function(x, dobj)
                 self.problem.constraints_function(result, x, grad)
-                print('in MMA')
-                res = self.eng.mmasub(matlab.double([n_constraints]), matlab.double([len(x)]), i + 1, matlab.double(x.tolist()),
-                                      matlab.double((x * 0).tolist()), matlab.double((x * 0 + 1).tolist()),
-                                      matlab.double(xold1.tolist()), matlab.double(xold2.tolist()),
-                                      matlab.double([obj]), matlab.double(dobj.tolist()),
-                                      matlab.double(result[:].tolist()), matlab.double(grad.tolist()),
-                                      matlab.double(low.tolist()), matlab.double(upp.tolist()), 1,
-                                      matlab.double((numpy.zeros((n_constraints, 1))).tolist()), matlab.double(
-                        (numpy.zeros((n_constraints, 1)) + 1000).tolist()), matlab.double((numpy.zeros((n_constraints, 1))).tolist()))
-                print('out MMA')
+
+                data = {'m': n_constraints, 'n': len(x), 'iter': i + 1, 'xval': x, 'xmin': x*0, 'xmax': x*0+1,
+                        'xold1': xold1, 'xold2': xold2, 'f0val': obj, 'df0dx': dobj, 'fval': result[:],
+                        'dfdx': grad, 'low': low, 'upp': upp, 'a0': 1, 'a': numpy.zeros((n_constraints, 1)),
+                        'c': numpy.zeros((n_constraints, 1))+1000, 'd': numpy.zeros((n_constraints, 1)),
+                        'nelx': self.problem.nelx, 'nely': self.problem.nely, 'nelz': self.problem.nelz}
+
+                if self.problem.process_number == 0:
+                    scipy.io.savemat('var.mat', data)
+                    self.eng.mmasub(nargout=0)
+                    mat_data = scipy.io.loadmat('res.mat')
+                elif self.problem.process_number == 1:
+                    scipy.io.savemat('var_1.mat', data)
+                    self.eng.mmasub_1(nargout=0)
+                    mat_data = scipy.io.loadmat('res_1.mat')
+                elif self.problem.process_number == 2:
+                    scipy.io.savemat('var_2.mat', data)
+                    self.eng.mmasub_2(nargout=0)
+                    mat_data = scipy.io.loadmat('res_2.mat')
+                elif self.problem.process_number == 3:
+                    scipy.io.savemat('var_3.mat', data)
+                    self.eng.mmasub_3(nargout=0)
+                    mat_data = scipy.io.loadmat('res_3.mat')
+                elif self.problem.process_number == 4:
+                    scipy.io.savemat('var_4.mat', data)
+                    self.eng.mmasub_4(nargout=0)
+                    mat_data = scipy.io.loadmat('res_4.mat')
+                elif self.problem.process_number == 5:
+                    scipy.io.savemat('var_5.mat', data)
+                    self.eng.mmasub_5(nargout=0)
+                    mat_data = scipy.io.loadmat('res_5.mat')
+                elif self.problem.process_number == 6:
+                    scipy.io.savemat('var_6.mat', data)
+                    self.eng.mmasub_6(nargout=0)
+                    mat_data = scipy.io.loadmat('res_6.mat')
+                elif self.problem.process_number == 7:
+                    scipy.io.savemat('var_7.mat', data)
+                    self.eng.mmasub_7(nargout=0)
+                    mat_data = scipy.io.loadmat('res_7.mat')
+
+                res = mat_data['res']
                 xold2 = xold1.copy()
                 xold1 = x.copy()
-                res = numpy.array(res)
                 x = res[:len(x), 0] * alpha + (1 - alpha) * x
                 low = res[len(x):len(x) * 2, 0]
                 upp = res[len(x) * 2:, 0]
-
-                if keyboard.is_pressed('s'):
+                if keyboard.is_pressed('5'):
                     print("Execution stopped by user.")
-                    return x
+                    return x, 0
+
+            return x
         return x
 
-
-
-    def objective_function_fdiff(self, x: numpy.ndarray, dobj: numpy.ndarray,
-                                 epsilon=1e-6) -> float:
-        """
-        Compute the objective value and gradient using finite differences.
-
-        Parameters
-        ----------
-        x:
-            The design variables for which to compute the objective.
-        dobj:
-            The gradient of the objective to compute.
-        epsilon:
-            Change in the finite difference to compute the gradient.
-
-        Returns
-        -------
-        float
-            The objective value.
-
-        """
-        obj = self.objective_function(x, dobj)
-
-        x0 = x.copy()
-        dobj0 = dobj.copy()
-        dobjf = numpy.zeros(dobj.shape)
-        for i, v in enumerate(x):
-            x = x0.copy()
-            x[i] += epsilon
-            o1 = self.objective_function(x, dobj)
-            x[i] = x0[i] - epsilon
-            o2 = self.objective_function(x, dobj)
-            dobjf[i] = (o1 - o2) / (2 * epsilon)
-            print("finite differences: {:g}".format(
-                numpy.linalg.norm(dobjf - dobj0)))
-            dobj[:] = dobj0
-        return obj
-
-
-# TODO: Seperate optimizer from TopOptSolver
-# class MMASolver(TopOptSolver):
-#     pass
-#
-#
-# TODO: Port over OC to TopOptSolver
 class OCSolver(TopOptSolver):
     def oc(self, x, volfrac, dc):
         """ Optimality criterion """
         l1 = 0
         l2 = 1e9
-        # move = volfrac / 2
         move = 0.1
         # reshape to perform vector operations
         xnew = numpy.zeros((len(x)))
 
-        while ((l2 - l1) / (l1 + l2)) > 1e-4:
+        while ((l2 - l1) / numpy.maximum((l1 + l2), 1e-9)) > 1e-4:
             lmid = 0.5 * (l2 + l1)
             xnew[:] = numpy.maximum(0.0, numpy.maximum(x - move, numpy.minimum(1.0,
                                numpy.minimum(x + move, x * numpy.sqrt(-dc / lmid)))))
@@ -275,16 +292,16 @@ class OCSolver(TopOptSolver):
         return xnew
 
     def optimize(self, x: numpy.ndarray):
-        maxiter = 40
         i = 0
 
         self.dc = x.copy()
         self.xPhys = x.copy()
 
-        while maxiter > i:
-            self.problem.objective_function(x, self.dc)
+        while self.maxeval > i:
+            obj = self.problem.objective_function(x, self.dc)
             x_new = self.oc(x, self.problem.volfrac, self.dc)
             x = x_new.copy()
             i = i + 1
+            print(i)
 
-        return x
+        return x, obj

@@ -179,9 +179,10 @@ class SensitivityBasedFilter(Filter):
             The filtered objective sensitivities to be computed.
 
         """
+        alpha = 1
         dobj[:] = (numpy.asarray(
             (self.H * (xPhys * dobj))[numpy.newaxis].T / self.Hs)[:, 0] /
-            numpy.maximum(0.001, xPhys))
+            numpy.maximum(0.001, xPhys)) * alpha + (1-alpha) * dobj[:]
 
     def filter_volume_sensitivities(
             self, xPhys: numpy.ndarray, dv: numpy.ndarray) -> None:

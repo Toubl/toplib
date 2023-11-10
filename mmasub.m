@@ -1,9 +1,9 @@
 %-------------------------------------------------------
 %    This is the file mmasub.m
 %
-function [res] = ...
-mmasub(m,n,iter,xval,xmin,xmax,xold1,xold2,f0val, df0dx,fval,dfdx,low,upp,a0,a,c,d)
-% [xmma,ymma,zmma,lam,xsi,eta,mu,zet,s,low,upp] 
+% function [res] = ...
+% mmasub()
+% [xmma,ymma,zmma,lam,xsi,eta,mu,zet,s,low,upp]
 %    Version September 2007 (and a small change August 2008)
 %
 %    Krister Svanberg <krille@math.kth.se>
@@ -11,7 +11,7 @@ mmasub(m,n,iter,xval,xmin,xmax,xold1,xold2,f0val, df0dx,fval,dfdx,low,upp,a0,a,c
 %
 %    This function mmasub performsl one MMA-iteration, aimed at
 %    solving the nonlinear programming problem:
-%         
+%
 %      Minimize  f_0(x) + a_0*z + sum( c_i*y_i + 0.5*d_i*(y_i)^2 )
 %    subject to  f_i(x) - a_i*z - y_i <= 0,  i = 1,...,m
 %                xmin_j <= x_j <= xmax_j,    j = 1,...,n
@@ -42,7 +42,7 @@ mmasub(m,n,iter,xval,xmin,xmax,xold1,xold2,f0val, df0dx,fval,dfdx,low,upp,a0,a,c
 %  a     = Column vector with the constants a_i in the terms a_i*z.
 %  c     = Column vector with the constants c_i in the terms c_i*y_i.
 %  d     = Column vector with the constants d_i in the terms 0.5*d_i*(y_i)^2.
-%     
+%
 %*** OUTPUT:
 %
 %  xmma  = Column vector with the optimal values of the variables x_j
@@ -62,109 +62,172 @@ mmasub(m,n,iter,xval,xmin,xmax,xold1,xold2,f0val, df0dx,fval,dfdx,low,upp,a0,a,c
 %  upp   = Column vector with the upper asymptotes, calculated and used
 %          in the current MMA subproblem.
 % save('wq.mat', 'm','n','iter','xval','xmin','xmax','xold1','xold2','f0val', 'df0dx','fval','dfdx','low','upp','a0','a','c','d');
-xval = xval';
-xmin = xmin';
-xmax = xmax';
-xold1 = xold1';
-xold2 = xold2';
-df0dx = df0dx';
-fval = fval';
-low = low';
-upp = upp';
-a0 = double(a0);
-a = double(a);
-c = double(c);
-d = double(d);
+    load('var.mat')
 
+    if iter == 1
+        warning('off','MATLAB:nearlySingularMatrix')
+    end
 
+    xval = reshape(xval, [nely, nelz, nelx]);
+    xval = xval(1:nely/2,1:nelz/2,:);
+    xkernel = xval;
+    xval = reshape(xval, nelx*nely*nelz/4, 1);
+    xold1 = reshape(xold1, [nely, nelz, nelx]);
+    xold1 = xold1(1:nely/2,1:nelz/2,:);
+    xold1 = reshape(xold1, nelx*nely*nelz/4, 1);
+    xold2 = reshape(xold2, [nely, nelz, nelx]);
+    xold2 = xold2(1:nely/2,1:nelz/2,:);
+    xold2 = reshape(xold2, nelx*nely*nelz/4, 1);
+    upp = reshape(upp, [nely, nelz, nelx]);
+    upp = upp(1:nely/2,1:nelz/2,:);
+    upp = reshape(upp, nelx*nely*nelz/4, 1);
+    low = reshape(low, [nely, nelz, nelx]);
+    low = low(1:nely/2,1:nelz/2,:);
+    low = reshape(low, nelx*nely*nelz/4, 1);
+    df0dx = reshape(df0dx, [nely, nelz, nelx]);
+    df0dx = df0dx(1:nely/2,1:nelz/2,:);
+    df0dx = reshape(df0dx, nelx*nely*nelz/4, 1);
+    dfdx_new = zeros(size(dfdx,1),size(dfdx,2)/4);
+    for i = 1:size(dfdx,1)
+        intermed = reshape(dfdx(i,:), [nely, nelz, nelx]);
+        intermed = intermed(1:nely/2,1:nelz/2,:);
+%         if iter < 55
+%             intermed = imgaussfilt3(intermed.*xkernel,2);%./max(0.001,xkernel);
+%         end
+        dfdx_new(i,:) = reshape(intermed, nelx*nely*nelz/4, 1)';
+    end
+    dfdx = dfdx_new;
+    xmin = xmin(1:nelx*nely*nelz/4)';
+    xmax = xmax(1:nelx*nely*nelz/4)';
+    n = n/4;
+    fval = fval/4;
+%     xmin = xmin + 1e-3;
 
-epsimin = sqrt(m+n)*10^(-9); % 1e-7 1e-9
-raa0 = 1e-5;
-move = 0.5;% 1 opt 0.2? 0.5akt
-albefa = 0.1;
-asyinit = 0.5;%0.1, 0.5 0.5
-asyincr = 1.05;%1.1 1.2 1.05
-asydecr = 0.65;%0.85 0.7 0.65
-eeen = ones(n,1);
-eeem = ones(m,1);
-zeron = zeros(n,1);
+    % xval = xval';
+    % xmin = xmin';
+    % xmax = xmax';
+    % xold1 = xold1';
+    % xold2 = xold2';
+    % df0dx = df0dx';
+    fval = fval';
+    % low = low';
+    % upp = upp';
 
-% Calculation of the asymptotes low and upp :
-if iter < 2.5
-  low = xval - asyinit*(xmax-xmin);
-  upp = xval + asyinit*(xmax-xmin);
-else
-  zzz = (xval-xold1).*(xold1-xold2);
-  factor = eeen;
-  factor(find(zzz > 0)) = asyincr;
-  factor(find(zzz < 0)) = asydecr;
-  low = xval - factor.*(xold1 - low);
-  upp = xval + factor.*(upp - xold1);
-  lowmin = xval - 10*(xmax-xmin);
-  lowmax = xval - 0.01*(xmax-xmin);
-  uppmin = xval + 0.01*(xmax-xmin);
-  uppmax = xval + 10*(xmax-xmin);
-  low = max(low,lowmin);
-  low = min(low,lowmax);
-  upp = min(upp,uppmax);
-  upp = max(upp,uppmin);
-end
+    a0 = double(a0);
+    a = double(a);
+    c = double(c);
+    d = double(d);
 
-% Calculation of the bounds alfa and beta :
+    epsimin = sqrt(double(m+n*4))*10^(-9); % 1e-7 1e-9
+    raa0 = 1e-5;
+    move = 0.5;% 1 opt 0.2? 0.5akt
+    albefa = 0.1;
+    asyinit = 0.1;%0.1;%0.1, 0.5 0.5
+    asyincr = 1.1;%1.1;%1.1 1.2 1.05
+    asydecr = 0.7;%0.85;%0.85 0.7 0.65
+%     asyinit = 0.1;%0.1, 0.5 0.5
+%     asyincr = 1.1;%1.1 1.2 1.05
+%     asydecr = 0.85;%0.85 0.7 0.65
+    eeen = ones(n,1);
+    eeem = ones(m,1);
+    zeron = zeros(n,1);
 
-zzz1 = low + albefa*(xval-low);
-zzz2 = xval - move*(xmax-xmin);
-zzz  = max(zzz1,zzz2);
-alfa = max(zzz,xmin);
-zzz1 = upp - albefa*(upp-xval);
-zzz2 = xval + move*(xmax-xmin);
-zzz  = min(zzz1,zzz2);
-beta = min(zzz,xmax);
+    % Calculation of the asymptotes low and upp :
+    if iter < 2.5
+      low = xval - asyinit*(xmax-xmin);
+      upp = xval + asyinit*(xmax-xmin);
+    else
+      zzz = (xval-xold1).*(xold1-xold2);
+      factor = eeen;
+      factor(find(zzz > 0)) = asyincr;
+      factor(find(zzz < 0)) = asydecr;
+      low = xval - factor.*(xold1 - low);
+      upp = xval + factor.*(upp - xold1);
+      lowmin = xval - 10*(xmax-xmin);
+      lowmax = xval - 0.01*(xmax-xmin);
+      uppmin = xval + 0.01*(xmax-xmin);
+      uppmax = xval + 10*(xmax-xmin);
+      low = max(low,lowmin);
+      low = min(low,lowmax);
+      upp = min(upp,uppmax);
+      upp = max(upp,uppmin);
+    end
 
-% Calculations of p0, q0, P, Q and b.
+    % Calculation of the bounds alfa and beta :
 
-xmami = xmax-xmin;
-xmamieps = 0.00001*eeen;
-xmami = max(xmami,xmamieps);
-xmamiinv = eeen./xmami;
-ux1 = upp-xval;
-ux2 = ux1.*ux1;
-xl1 = xval-low;
-xl2 = xl1.*xl1;
-uxinv = eeen./ux1;
-xlinv = eeen./xl1;
-%
-p0 = zeron;
-q0 = zeron;
-p0 = max(df0dx,0);
-q0 = max(-df0dx,0);
-%p0(find(df0dx > 0)) = df0dx(find(df0dx > 0));
-%q0(find(df0dx < 0)) = -df0dx(find(df0dx < 0));
-pq0 = 0.001*(p0 + q0) + raa0*xmamiinv;
-p0 = p0 + pq0;
-q0 = q0 + pq0;
-p0 = p0.*ux2;
-q0 = q0.*xl2;
-%
-P = sparse(m,n);
-Q = sparse(m,n);
-P = max(dfdx,0);
-Q = max(-dfdx,0);
-%P(find(dfdx > 0)) = dfdx(find(dfdx > 0));
-%Q(find(dfdx < 0)) = -dfdx(find(dfdx < 0));
-PQ = 0.001*(P + Q) + raa0*eeem*xmamiinv';
-P = P + PQ;
-Q = Q + PQ;
+    zzz1 = low + albefa*(xval-low);
+    zzz2 = xval - move*(xmax-xmin);
+    zzz  = max(zzz1,zzz2);
+    alfa = max(zzz,xmin);
+    zzz1 = upp - albefa*(upp-xval);
+    zzz2 = xval + move*(xmax-xmin);
+    zzz  = min(zzz1,zzz2);
+    beta = min(zzz,xmax);
 
-P = P * spdiags(ux2,0,n,n);
-Q = Q * spdiags(xl2,0,n,n);
-b = P*uxinv + Q*xlinv - fval ;
-%
-%%% Solving the subproblem by a primal-dual Newton method
-[xmma,ymma,zmma,lam,xsi,eta,mu,zet,s] = ...
-subsolv(m,n,epsimin,low,upp,alfa,beta,p0,q0,P,Q,a0,a,b,c,d);
-res = [xmma;low;upp];
+    % Calculations of p0, q0, P, Q and b.
 
+    xmami = xmax-xmin;
+    xmamieps = 0.00001*eeen;
+    xmami = max(xmami,xmamieps);
+    xmamiinv = eeen./xmami;
+    ux1 = upp-xval;
+    ux2 = ux1.*ux1;
+    xl1 = xval-low;
+    xl2 = xl1.*xl1;
+    uxinv = eeen./ux1;
+    xlinv = eeen./xl1;
+    %
+    p0 = zeron;
+    q0 = zeron;
+    p0 = max(df0dx,0);
+    q0 = max(-df0dx,0);
+    %p0(find(df0dx > 0)) = df0dx(find(df0dx > 0));
+    %q0(find(df0dx < 0)) = -df0dx(find(df0dx < 0));
+    pq0 = 0.001*(p0 + q0) + raa0*xmamiinv;
+    p0 = p0 + pq0;
+    q0 = q0 + pq0;
+    p0 = p0.*ux2;
+    q0 = q0.*xl2;
+    %
+    P = sparse(m,n);
+    Q = sparse(m,n);
+    P = max(dfdx,0);
+    Q = max(-dfdx,0);
+    %P(find(dfdx > 0)) = dfdx(find(dfdx > 0));
+    %Q(find(dfdx < 0)) = -dfdx(find(dfdx < 0));
+    PQ = 0.001*(P + Q) + raa0*eeem*xmamiinv';
+    P = P + PQ;
+    Q = Q + PQ;
 
+    P = P .* ux2';
+    Q = Q .* xl2';
+    b = P*uxinv + Q*xlinv - fval ;
+    %
+    %%% Solving the subproblem by a primal-dual Newton method
+    [xmma,ymma,zmma,lam,xsi,eta,mu,zet,s] = ...
+    subsolv(m,n,epsimin,low,upp,alfa,beta,p0,q0,P,Q,a0,a,b,c,d);
+
+    xmma = reshape(xmma, [nely/2, nelz/2, nelx]);
+    xmma = [xmma; flipud(xmma)];
+    xmma = [xmma, fliplr(xmma)];
+    xmma = reshape(xmma, nelx*nely*nelz, 1);
+
+    low = reshape(low, [nely/2, nelz/2, nelx]);
+    low = [low; flipud(low)];
+    low = [low, fliplr(low)];
+    low = reshape(low, nelx*nely*nelz, 1);
+
+    upp = reshape(upp, [nely/2, nelz/2, nelx]);
+    upp = [upp; flipud(upp)];
+    upp = [upp, fliplr(upp)];
+    upp = reshape(upp, nelx*nely*nelz, 1);
+
+    res = [xmma;low;upp];
+
+    if isnan(sum(xmma))
+            error('xmma is NaN');
+    end
+    save('res.mat', 'res');
+% end
 
 

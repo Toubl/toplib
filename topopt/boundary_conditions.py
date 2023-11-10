@@ -101,8 +101,7 @@ class FixedBeamBoundaryConditions(BoundaryConditions):
         f = self.f
         return f
     def set_forces(self, F):
-        self.f = numpy.zeros((self.ndof - 2 * 3 * (self.nely + 1) * (self.nelz + 1) + 6, F.shape[1]))
-        self.f[0:6, :] = F
+        self.f = F
 class MBBBeamBoundaryConditions(BoundaryConditions):
     """Boundary conditions for the Messerschmitt–Bölkow–Blohm (MBB) beam."""
 

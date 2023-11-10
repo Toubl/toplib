@@ -10,16 +10,17 @@ function [xmma,ymma,zmma,lamma,xsimma,etamma,mumma,zetmma,smma] = ...
 subsolv(m,n,epsimin,low,upp,alfa,beta,p0,q0,P,Q,a0,a,b,c,d);
 %
 % This function subsolv solves the MMA subproblem:
-%         
+%
 % minimize   SUM[ p0j/(uppj-xj) + q0j/(xj-lowj) ] + a0*z +
 %          + SUM[ ci*yi + 0.5*di*(yi)^2 ],
 %
 % subject to SUM[ pij/(uppj-xj) + qij/(xj-lowj) ] - ai*z - yi <= bi,
 %            alfaj <=  xj <=  betaj,  yi >= 0,  z >= 0.
-%        
+%
 % Input:  m, n, low, upp, alfa, beta, p0, q0, P, Q, a0, a, b, c, d.
 % Output: xmma,ymma,zmma, slack variables and Lagrange multiplers.
 %
+b = b*4;
 een = ones(n,1);
 eem = ones(m,1);
 epsi = 1;
@@ -46,16 +47,19 @@ while epsi > epsimin
   xl2 = xl1.*xl1;
   uxinv1 = een./ux1;
   xlinv1 = een./xl1;
-  plam = p0 + P'*lam ;
-  qlam = q0 + Q'*lam ;
   gvec = P*uxinv1 + Q*xlinv1;
-  dpsidx = plam./ux2 - qlam./xl2 ;
+  gvec = gvec * 4;
+
+  dpsidx = (p0 + P'*lam)./ux2 - (q0 + Q'*lam)./xl2 ;
   rex = dpsidx - xsi + eta;
+  rex = rex * 2;
   rey = c + d.*y - mu - lam;
   rez = a0 - zet - a'*lam;
   relam = gvec - a*z - y + s - b;
   rexsi = xsi.*(x-alfa) - epsvecn;
+  rexsi = rexsi * 2;
   reeta = eta.*(beta-x) - epsvecn;
+  reeta = reeta * 2;
   remu = mu.*y - epsvecm;
   rezet = zet*z - epsi;
   res = lam.*s - epsvecm;
@@ -81,7 +85,8 @@ while epsi > epsimin
     plam = p0 + P'*lam ;
     qlam = q0 + Q'*lam ;
     gvec = P*uxinv1 + Q*xlinv1;
-    GG = P*spdiags(uxinv2,0,n,n) - Q*spdiags(xlinv2,0,n,n);
+    gvec = gvec * 4;
+    GG = P.*uxinv2' - Q.*xlinv2';
     dpsidx = plam./ux2 - qlam./xl2 ;
     delx = dpsidx - epsvecn./(x-alfa) + epsvecn./(beta-x);
     dely = c + d.*y - lam - epsvecm./y;
@@ -95,9 +100,9 @@ while epsi > epsimin
     diaglam = s./lam;
     diaglamyi = diaglam+diagyinv;
     if m < n
-      blam = dellam + dely./diagy - GG*(delx./diagx);
+      blam = dellam + dely./diagy - GG*(delx./diagx)*4;
       bb = [blam' delz]';
-      Alam = spdiags(diaglamyi,0,m,m) + GG*spdiags(diagxinv,0,n,n)*GG';
+      Alam = diag(diaglamyi) + GG.*diagxinv'*GG'*4;
       AA = [Alam     a
             a'    -zet/z ];
       solut = AA\bb;
@@ -127,10 +132,8 @@ while epsi > epsimin
     dmu  = -mu + epsvecm./y - (mu.*dy)./y;
     dzet = -zet + epsi/z - zet*dz/z;
     ds   = -s + epsvecm./lam - (s.*dlam)./lam;
-    xx  = [ y'  z  lam'  xsi'  eta'  mu'  zet  s']';
-    dxx = [dy' dz dlam' dxsi' deta' dmu' dzet ds']';
-%    
-    stepxx = -1.01*dxx./xx;
+
+    stepxx = 1.01*[max(-dy./y) max(-dz./z) max(-dlam./lam) max(-dxsi./xsi) max(-deta./eta) max(-dmu./mu) max(-dzet./zet) max(-ds./s)];
     stmxx  = max(stepxx);
     stepalfa = -1.01*dx./(x-alfa);
     stmalfa = max(stepalfa);
@@ -170,30 +173,35 @@ while epsi > epsimin
     xl2 = xl1.*xl1;
     uxinv1 = een./ux1;
     xlinv1 = een./xl1;
-    plam = p0 + P'*lam ;
-    qlam = q0 + Q'*lam ;
     gvec = P*uxinv1 + Q*xlinv1;
-    dpsidx = plam./ux2 - qlam./xl2 ;
+    gvec = gvec * 4;
+    dpsidx = (p0 + P'*lam)./ux2 - (q0 + Q'*lam)./xl2 ;
     rex = dpsidx - xsi + eta;
+    rex = rex * 2;
     rey = c + d.*y - mu - lam;
     rez = a0 - zet - a'*lam;
     relam = gvec - a*z - y + s - b;
     rexsi = xsi.*(x-alfa) - epsvecn;
+    rexsi = rexsi * 2;
     reeta = eta.*(beta-x) - epsvecn;
+    reeta = reeta * 2;
     remu = mu.*y - epsvecm;
     rezet = zet*z - epsi;
     res = lam.*s - epsvecm;
-    residu1 = [rex' rey' rez]';
-    residu2 = [relam' rexsi' reeta' remu' rezet res']';
-    residu = [residu1' residu2']';
-    resinew = sqrt(residu'*residu);
+    resinew = rex'* rex + rey' * rey + rez *rez + relam'*relam + ....
+    rexsi' * rexsi + reeta' * reeta +  remu' * remu +  rezet * rezet + res'*res;
+    resinew = sqrt(resinew);
     steg = steg/2;
+    if isnan(sum(x))
+        error('x is nan')
+    end
     end
   residunorm=resinew;
-  residumax = max(abs(residu));
+  residu = [max(abs(rex))/2 max(abs(rey)) max(abs(rez)) max(abs(relam))...
+      max(abs(rexsi))/2 max(abs(reeta))/2 max(abs(remu)) max(abs(rezet)) max(abs(res))];
+  residumax = max(residu);
   steg = 2*steg;
   end
-%   if ittt > 198
  if ittt > 400
     epsi
     ittt

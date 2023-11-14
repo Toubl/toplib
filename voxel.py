@@ -185,7 +185,7 @@ def x_to_stl(nelx, nely, nelz, tol, x, output_filename):
     filename = "smooth.stl"
     smooth_w_taubin.save(filename)
 
-#
+
 # x_opt = []
 # with open('x_opt.txt', 'r') as file:
 #     for line in file:
@@ -193,4 +193,4 @@ def x_to_stl(nelx, nely, nelz, tol, x, output_filename):
 #         x_opt.append(entry)
 #
 # x_opt = numpy.array(x_opt).astype(numpy.float64)
-# x_to_stl(40, 20, 20, 0.1, x_opt, 'smooth.stl')
+# x_to_stl(96, 48, 12, 0.1, x_opt, 'smooth.stl')

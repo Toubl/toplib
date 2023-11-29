@@ -16,7 +16,7 @@ from topopt.problems import Problem
 class TopOptSolver:
     """Solver for topology optimization problems using NLopt's MMA solver."""
 
-    def __init__(self, problem: Problem, n_constraints, maxeval=40, ftol_rel=1e-6):
+    def __init__(self, problem: Problem, n_constraints, maxeval=500, ftol_rel=1e-4):
         """
         Create a solver to solve the problem.
 
@@ -40,9 +40,10 @@ class TopOptSolver:
 
         n = problem.nelx * problem.nely * problem.nelz
         self.opt = nlopt.opt(nlopt.LD_MMA, n)
-        self.opt.set_param('inner_maxeval', 2)
-        # self.opt.set_param('verbosity', 1)
+        self.opt.set_param('inner_maxeval', 10)
+        self.opt.set_param('verbosity', 0)
         self.xPhys = numpy.ones(n)
+        self.n_constraints = n_constraints
 
         # set bounds on the value of x (0 ≤ x ≤ 1)
         self.opt.set_lower_bounds(numpy.zeros(n))

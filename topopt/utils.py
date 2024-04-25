@@ -11,6 +11,37 @@ import scipy.sparse
 import scipy.io
 from matplotlib import colors
 
+def xyz_to_id(x: int, y:int, z:int, nelx:int, nely:int, nelz:int) -> int:
+    """
+    Map from 3D indices of a node to the flattened 1D index.
+    The order of indecies is Fortran/column-major order.
+
+    The number of elements is (nelx x nely x nelz), and the number of nodes is
+    (nelx + 1) x (nely + 1) x (nelz + 1).
+
+    Parameters
+    ----------
+    x:
+        The x-coordinate of the node's positions.
+    y:
+        The y-coordinate of the node's positions.
+    z:
+        The z-coordinate of the node's positions.
+    nelx:
+        The number of elements in the x-direction.
+    nely:
+        The number of elements in the y-direction.
+    nelz:
+        The number of elements in the z-direction.
+
+    Returns
+    -------
+        The index of the node in the flattened version.
+
+    """
+    
+    return (x * (nelz + 1) * (nely + 1) + z * (nely + 1) + y)
+
 
 def xy_to_id(x: int, y: int, nelx: int, nely: int, order: str = "F") -> int:
     """

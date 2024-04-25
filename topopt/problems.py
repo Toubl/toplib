@@ -12,10 +12,8 @@ import cvxopt.cholmod
 from .boundary_conditions import BoundaryConditions
 from .utils import deleterowcol, xy_to_id
 from topopt.filters import Filter
-from topopt.filters import DensityBasedFilter
 
 import time
-import os
 
 
 class Problem(abc.ABC):
@@ -37,7 +35,7 @@ class Problem(abc.ABC):
 
     """
 
-    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter):
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, FilterOn: bool):
         """
         Create the topology optimization problem.
 
@@ -59,12 +57,15 @@ class Problem(abc.ABC):
         self.xPhys = numpy.ones(self.nel)
 
         self.filter = filter
+        self.FilterOn = FilterOn
+        
 
         # Count degrees of fredom
         if self.nelz > 1:
             self.ndof = 3 * (self.nelx + 1) * (self.nely + 1) * (self.nelz + 1)
         else:
             self.ndof = 2 * (self.nelx + 1) * (self.nely + 1)
+
 
         # SIMP penalty
         self.penalty = penalty
@@ -89,22 +90,8 @@ class Problem(abc.ABC):
         self.obje = numpy.zeros(self.nely * self.nelx * self.nelz)
 
         self.iter = 0
+        
         self.passive = self.bc.passive_elements
-
-        # # setup filter
-        # cylinder = 0
-        # if cylinder == 1:
-        #     x_coords = (numpy.arange(-(self.nelx // 2), self.nelx // 2) + 0.5) ** 2
-        #     y_coords = (numpy.arange(-(self.nely // 2), self.nely // 2) + 0.5) ** 2
-        #     z_coords = (numpy.arange(-(self.nelz // 2), self.nelz // 2) + 0.5) ** 2
-        #     # Generate coordinate grids using meshgrid
-        #     X, Y, Z = numpy.meshgrid(x_coords, y_coords, z_coords, indexing='ij')
-        #     # T = (Y + Z) > ((self.nely / 2 - 0.5) ** 2 + 0.24)
-        #     T = (Y) < (self.nely / 2 - 7.6) ** 2
-        #     T = numpy.reshape(T, self.nelx * self.nely * self.nelz, order='C').astype(int)
-        #     self.passive = numpy.array(numpy.where(T == 1))
-        #     self.passive_0 = self.passive
-
         if self.passive.size > 0:
             self.xPhys[self.passive] = 0
         self.active = self.bc.active_elements
@@ -147,9 +134,10 @@ class Problem(abc.ABC):
         rho = x**self.penalty
         if drho is not None:
             assert(drho.shape == x.shape)
-            drho[:] = rho
-            valid = x != 0  # valid values for division
-            drho[valid] *= self.penalty / x[valid]
+            #drho[:] = rho
+            #valid = x != 0  # valid values for division
+            #drho[valid] *= self.penalty / x[valid]
+            drho[:] = self.penalty*x**(self.penalty-1)
         return rho
 
     def filter_variables(self, x: numpy.ndarray) -> numpy.ndarray:
@@ -167,11 +155,18 @@ class Problem(abc.ABC):
             The filtered "physical" variables.
 
         """
-        self.filter.filter_variables(x, self.xPhys) # xPhys gets allocated in-place here
-        if self.passive.size > 0:
-            self.xPhys[self.passive] = 0
-        if self.active.size > 0:
-            self.xPhys[self.active] = 1
+        if self.FilterOn :
+            self.filter.filter_variables(x, self.xPhys) # xPhys gets allocated in-place here
+            if self.passive.size > 0:
+                self.xPhys[self.passive] = 0
+            if self.active.size > 0:
+                self.xPhys[self.active] = 1
+        else:
+            self.xPhys = x
+            if self.passive.size > 0:
+                self.xPhys[self.passive] = 0
+            if self.active.size > 0:
+                self.xPhys[self.active] = 1
         return self.xPhys
 
 
@@ -225,6 +220,787 @@ class Problem(abc.ABC):
         pass
 
 
+class ElasticityNoRBE2Problem2(Problem):
+    """
+    Abstract elasticity topology optimization problem without RBE2.
+
+    Attributes
+    ----------
+    Emin: float
+        The Young's modulus use for the void regions.
+    Emax: float
+        The Young's modulus use for the solid regions.
+    nu: float
+        Poisson's ratio of the material.
+    f: numpy.ndarray
+        The right-hand side of the FEM equation (forces).
+    u: numpy.ndarray
+        The variables of the FEM equation (displacments).
+    nloads: int
+        The number of loads applied to the material.
+
+    """
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, FilterOn: bool,constraints, constraints_f):
+            """
+            Create the topology optimization problem.
+    
+            Parameters
+            ----------
+            bc:
+                The boundary conditions of the problem.
+            penalty:
+                The penalty value used to penalize fractional densities in SIMP.
+    
+            """
+            super().__init__(bc, penalty, volfrac, filter, FilterOn)
+            # Max and min stiffness
+            self.Emin = 1e-9
+            self.Emax = 1.0
+    
+            # FE: Build the index vectors for the for coo matrix format.
+            self.nu = 0.3
+            self.build_indices()
+    
+            # Number of loads
+            self.nloads = self.f.shape[1]
+                  
+            
+            if (len(constraints) != 0):
+                self.constraint_f = constraints_f
+                self.constraints = constraints
+            
+    @staticmethod
+    def lk(E: float = 1.0, nu: float = 0.3) -> numpy.ndarray:
+        """
+        Build the element stiffness matrix.
+
+        Parameters
+        ----------
+        E:
+            The Young's modulus of the material.
+        nu:
+            The Poisson's ratio of the material.
+
+        Returns
+        -------
+        numpy.ndarray
+            The element stiffness matrix for the material.
+
+        """
+        k = numpy.array([
+            0.5 - nu / 6., 0.125 + nu / 8., -0.25 - nu / 12.,
+            -0.125 + 0.375 * nu, -0.25 + nu / 12., -0.125 - nu / 8., nu / 6.,
+            0.125 - 0.375 * nu])
+        KE = E / (1 - nu**2) * numpy.array([
+            [k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]],
+            [k[1], k[0], k[7], k[6], k[5], k[4], k[3], k[2]],
+            [k[2], k[7], k[0], k[5], k[6], k[3], k[4], k[1]],
+            [k[3], k[6], k[5], k[0], k[7], k[2], k[1], k[4]],
+            [k[4], k[5], k[6], k[7], k[0], k[1], k[2], k[3]],
+            [k[5], k[4], k[3], k[2], k[1], k[0], k[7], k[6]],
+            [k[6], k[3], k[4], k[1], k[2], k[7], k[0], k[5]],
+            [k[7], k[2], k[1], k[4], k[3], k[6], k[5], k[0]]])
+        return KE
+
+    def build_indices(self) -> None:
+        """Build the index vectors for the finite element coo matrix format."""
+        self.KE = self.lk(E=self.Emax, nu=self.nu)
+        self.edofMat = numpy.zeros((self.nelx * self.nely, 8), dtype=int)
+        for elx in range(self.nelx):
+            for ely in range(self.nely):
+                el = ely + elx * self.nely
+                n1 = (self.nely + 1) * elx + ely
+                n2 = (self.nely + 1) * (elx + 1) + ely
+                self.edofMat[el, :] = numpy.array([
+                    2 * n1 + 2, 2 * n1 + 3, 2 * n2 + 2, 2 * n2 + 3, 2 * n2,
+                    2 * n2 + 1, 2 * n1, 2 * n1 + 1])
+        # Construct the index pointers for the coo format
+        self.iK = numpy.kron(self.edofMat, numpy.ones((8, 1))).flatten()
+        self.jK = numpy.kron(self.edofMat, numpy.ones((1, 8))).flatten()
+
+    def compute_young_moduli(self, x: numpy.ndarray, dE: numpy.ndarray = None
+                             ) -> numpy.ndarray:
+        """
+        Compute the Young's modulus of each element from the densties.
+
+        Optionally compute the derivative of the Young's modulus.
+
+        Parameters
+        ----------
+        x:
+            The density variable of each element.
+        dE:
+            The derivative of Young's moduli to compute. Only set if dE is not
+            None.
+
+        Returns
+        -------
+        numpy.ndarray
+            The elements' Young's modulus.
+
+        """
+        drho = None if dE is None else numpy.empty(x.shape)
+        rho = self.penalize_densities(x, drho)
+        if drho is not None and dE is not None:
+            assert(dE.shape == x.shape)
+            dE[:] = (self.Emax - self.Emin) * drho
+        return (self.Emax - self.Emin) * rho + self.Emin
+
+    def build_K(self, xPhys: numpy.ndarray, remove_constrained: bool = True
+                ) -> scipy.sparse.coo_matrix:
+        """
+        Build the stiffness matrix for the problem.
+
+        Parameters
+        ----------
+        xPhys:
+            The element densisities used to build the stiffness matrix.
+        remove_constrained:
+            Should the constrained nodes be removed?
+
+        Returns
+        -------
+        scipy.sparse.coo_matrix
+            The stiffness matrix for the mesh.
+
+        """
+        sK = ((self.KE.flatten()[numpy.newaxis]).T *
+              self.compute_young_moduli(xPhys)).flatten(order='F')
+        K = scipy.sparse.coo_matrix(
+            (sK, (self.iK, self.jK)), shape=(self.ndof, self.ndof))
+        
+        if remove_constrained:
+            # Remove constrained dofs from matrix and convert to coo
+            K = deleterowcol(K.tocsc(), self.fixed, self.fixed).tocoo()
+        return K
+
+    def compute_displacements(self, xPhys: numpy.ndarray) -> numpy.ndarray:
+        """
+        Compute the displacements given the densities.
+
+        Compute the displacment, :math:`u`, using linear elastic finite
+        element analysis (solving :math:`Ku = f` where :math:`K` is the
+        stiffness matrix and :math:`f` is the force vector).
+
+        Parameters
+        ----------
+        xPhys:
+            The element densisities used to build the stiffness matrix.
+
+        Returns
+        -------
+        numpy.ndarray
+            The distplacements solve using linear elastic finite element
+            analysis.
+
+        """
+        # Setup and solve FE problem
+        K = self.build_K(xPhys)
+        K = cvxopt.spmatrix(
+            K.data, K.row.astype(int), K.col.astype(int))
+        # Solve system
+        F = cvxopt.matrix(self.f[self.free, :])
+        cvxopt.cholmod.linsolve(K, F)  # F stores solution after solve
+        new_u = self.u.copy()
+        new_u[self.free, :] = numpy.array(F)[:, :]
+        return new_u
+
+    def update_displacements(self, xPhys: numpy.ndarray) -> None:
+        """
+        Update the displacements of the problem.
+
+        Parameters
+        ----------
+        xPhys:
+            The element densisities used to compute the displacements.
+
+        """
+        self.u[:, :] = self.compute_displacements(xPhys)
+        
+    def compute_compliance(
+            self, xPhys: numpy.ndarray, dobj: numpy.ndarray) -> float:
+        r"""
+        Compute compliance and its gradient.
+
+        The objective is :math:`\mathbf{f}^{T} \mathbf{u}`. The gradient of
+        the objective is
+
+        :math:`\begin{align}
+        \mathbf{f}^T\mathbf{u} &= \mathbf{f}^T\mathbf{u} -
+        \boldsymbol{\lambda}^T(\mathbf{K}\mathbf{u} - \mathbf{f})\\
+        \frac{\partial}{\partial \rho_e}(\mathbf{f}^T\mathbf{u}) &=
+        (\mathbf{K}\boldsymbol{\lambda} - \mathbf{f})^T
+        \frac{\partial \mathbf u}{\partial \rho_e} +
+        \boldsymbol{\lambda}^T\frac{\partial \mathbf K}{\partial \rho_e}
+        \mathbf{u}
+        = \mathbf{u}^T\frac{\partial \mathbf K}{\partial \rho_e}\mathbf{u}
+        \end{align}`
+
+        where :math:`\boldsymbol{\lambda} = \mathbf{u}`.
+
+        Parameters
+        ----------
+        xPhys:
+            The element densities.
+        dobj:
+            The gradient of compliance.
+
+        Returns
+        -------
+        float
+            The compliance value.
+
+        """
+        # Setup and solve FE problem
+        self.update_displacements(xPhys)
+
+        obj = 0.0
+        dobj[:] = 0.0
+        dE = numpy.empty(xPhys.shape)
+        E = self.compute_young_moduli(xPhys, dE)
+        for i in range(self.nloads):
+            ui = self.u[:, i][self.edofMat].reshape(-1, 8)
+            self.obje[:] = (ui @ self.KE * ui).sum(1)
+            obj += (E * self.obje).sum()
+            dobj[:] += -dE * self.obje
+        dobj /= float(self.nloads)
+        return obj / float(self.nloads)
+    
+    def compute_volume(
+            self, x: numpy.ndarray, grad: numpy.ndarray) -> float:
+        """
+        Compute m problem constraints and their gradients
+        https://nlopt.readthedocs.io/en/latest/NLopt_Python_Reference/#vector-valued-constraints
+
+        If the argument grad is not empty (which is the case for MMA),
+        then grad is a 2d NumPy array of size m×n (m = number of constraints
+        n = number of design variables) which should (upon return)
+        be set in-place to the gradient of the function with
+        respect to the optimization parameters at x. [from nlopt docs]
+
+        Parameters
+        ----------
+        result:
+            The design variables.
+        grad:
+            The gradient of the nonlinear constraint wrt the design variables
+
+        Returns
+        -------
+        float
+            the constraint value(s) and derivatives
+
+        """
+        # Filter design variables
+        # self.filter_variables(x) # [pag]: This was commented for some reason
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
+
+        # Volume sensitivities
+        grad[:] = 1.0
+
+        # Sensitivity filtering
+        if self.FilterOn:
+            self.filter.filter_volume_sensitivities(self.xPhys, grad[:])
+
+        return self.xPhys.sum()
+    
+class ElasticityNoRBE2Problem3(Problem):
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, FilterOn: bool, constraints, constraints_f):
+        """
+        Create the topology optimization problem.
+
+        Parameters
+        ----------
+        bc:
+            The boundary conditions of the problem.
+        penalty:
+            The penalty value used to penalize fractional densities in SIMP.
+
+        """
+        super().__init__(bc, penalty, volfrac, filter,FilterOn)
+        # Max and min stiffness
+        # self.Emin = 1e-9
+        self.Emin = 0
+        self.Emax = 1.0
+
+        # FE: Build the index vectors for the for coo matrix format.
+        self.nu = 0.3
+
+        # Number of loads
+        self.nloads = self.f.shape[1]
+
+        # build indices(assignment local to global dof)
+        # and calculate element stiffness matrix
+        self.build_indices()
+        if (len(constraints) != 0):
+            self.constraint_f = constraints_f
+            self.constraints = constraints
+    
+    @staticmethod        
+    def lk(E: float = 1.0, nu: float = 0.3) -> numpy.ndarray:
+        """
+        Build the element stiffness matrix.
+
+        Parameters
+        ----------
+        E:
+            The Young's modulus of the material.
+        nu:
+            The Poisson's ratio of the material.
+
+        Returns
+        -------
+        numpy.ndarray
+            The element stiffness matrix for the material.
+
+        """
+        
+        A = numpy.array([[32, 6, -8, 6, -6, 4, 3, -6 ,-10, 3 ,-3 ,-3, -4 ,-8],
+                         [-48, 0, 0, -24 ,24, 0 ,0, 0 ,12, -12 ,0 ,12 ,12, 12]])
+        k = numpy.matmul(1/144*numpy.transpose(A),numpy.array([[1],[nu]]))
+        
+        K1 = numpy.array([[k[0,0], k[1,0], k[1,0], k[2,0], k[4,0], k[4,0]],
+            [k[1,0], k[0,0], k[1,0], k[3,0], k[5,0], k[6,0]],
+            [k[1,0], k[1,0], k[0,0], k[3,0], k[6,0], k[5,0]],
+            [k[2,0], k[3,0], k[3,0], k[0,0], k[7,0], k[7,0]],
+            [k[4,0], k[5,0], k[6,0], k[7,0], k[0,0], k[1,0]],
+            [k[4,0], k[6,0], k[5,0], k[7,0], k[1,0], k[0,0]]])
+        K2 = numpy.array([[k[8,0], k[7,0], k[11,0], k[5,0], k[3,0], k[6,0]],
+            [k[7,0], k[8,0], k[11,0], k[4,0], k[2,0], k[4,0]],
+            [k[9,0], k[9,0], k[12,0], k[6,0], k[3,0], k[5,0]],
+            [k[5,0], k[4,0], k[10,0], k[8,0], k[1,0], k[9,0]],
+            [k[3,0], k[2,0], k[4,0], k[1,0], k[8,0], k[11,0]],
+            [k[10,0],k[3,0], k[5,0], k[11,0], k[9,0], k[12,0]]])
+        K3 = numpy.array([[k[5,0], k[6,0], k[3,0], k[8,0], k[11,0], k[7,0]],
+            [k[6,0], k[5,0], k[3,0], k[9,0], k[12,0], k[9,0]],
+            [k[4,0], k[4,0], k[2,0], k[7,0], k[11,0], k[8,0]],
+            [k[8,0], k[9,0], k[1,0], k[5,0], k[10,0], k[4,0]],
+            [k[11,0], k[12,0], k[9,0], k[10,0], k[5,0], k[3,0]],
+            [k[1,0], k[11,0], k[8,0], k[3,0], k[4,0], k[2,0]]])
+        K4 = numpy.array([[k[13,0], k[10,0], k[10,0], k[12,0], k[9,0], k[9,0]],
+            [k[10,0], k[13,0], k[10,0], k[11,0], k[8,0],  k[7,0]],
+            [k[10,0], k[10,0], k[13,0], k[11,0], k[7,0],  k[8,0]],
+            [k[12,0], k[11,0], k[11,0], k[13,0], k[6,0],  k[6,0]],
+            [k[9,0], k[8,0],  k[7,0],  k[6,0],  k[13,0], k[10,0]],
+            [k[9,0], k[7,0],  k[8,0],  k[6,0],  k[10,0], k[13,0]]])
+        K5 = numpy.array([[k[0,0], k[1,0],  k[7,0],  k[2,0], k[4,0],  k[3,0]],
+            [k[1,0], k[0,0],  k[7,0],  k[3,0], k[5,0],  k[10,0]],
+            [k[7,0], k[7,0],  k[0,0],  k[4,0], k[10,0], k[5,0]],
+            [k[2,0], k[3,0],  k[4,0],  k[0,0], k[7,0],  k[1,0]],
+            [k[4,0], k[5,0],  k[10,0], k[7,0], k[0,0], k[7,0]],
+            [k[3,0], k[10,0], k[5,0],  k[1,0], k[7,0],  k[0,0]]])
+        K6 = numpy.array([[k[13,0], k[10,0], k[6,0],  k[12,0], k[9,0], k[11,0]],
+            [k[10,0], k[13,0], k[6,0],  k[11,0], k[8,0],  k[1,0]],
+            [k[6,0],  k[6,0],  k[13,0], k[9,0], k[1,0],  k[8,0]],
+            [k[12,0], k[11,0], k[9,0], k[13,0], k[6,0],  k[10,0]],
+            [k[9,0], k[8,0],  k[1,0],  k[6,0],  k[13,0], k[6,0]],
+            [k[11,0], k[1,0],  k[8,0],  k[10,0], k[6,0],  k[13,0]]])
+        
+        
+        KE = 1 / ((nu+1)*(1-2*nu)) * numpy.block([
+            [K1, K2, K3, K4],
+            [numpy.transpose(K2), K5, K6, numpy.transpose(K3)],
+            [numpy.transpose(K3), K6, numpy.transpose(K5), numpy.transpose(K2)],
+            [K4, K3, K2, numpy.transpose(K1)]])
+        
+        return KE
+    
+    def build_indices(self) -> None:
+        """Build the index vectors for the finite element coo matrix format."""
+        self.KE = self.lk(E=self.Emax, nu=self.nu)
+        
+        nodegrd = numpy.reshape(numpy.arange((self.nelz+1)*(self.nely+1),dtype = numpy.int32 )
+                                , ((self.nely+1),(self.nelz+1)),order='F')
+        
+        nodeids = numpy.reshape(nodegrd[0:-1,0:-1], (self.nely*self.nelz,1), order='F')
+        
+        nodeidx = numpy.arange(0, ((self.nelx)*(self.nely+1)*(self.nelz+1)),(self.nely+1)*(self.nelz+1))
+        
+        nodeids = numpy.tile(nodeids, (1,nodeidx.size)) + numpy.tile(nodeidx,(nodeids.size,1))
+        
+        edofVec = 3*numpy.reshape(nodeids,(self.nel,1),order='F') + 3
+        
+        a = 3*(self.nely+1)*(self.nelz+1)
+        b = 3 * (self.nely+1)
+        self.edofMat = numpy.tile(edofVec, (1,24)) + numpy.tile(numpy.array([0,1,2,a,a+1,a+2,a-3,a-2,a-1,-3,-2,-1,
+                                b,b+1,b+2,b+a,b+a+1,b+a+2,b+a-3,b+a-2,b+a-1,b-3,b-2,b-1]), (self.nel,1))
+        
+        
+        self.iK = numpy.kron(self.edofMat, numpy.ones((24, 1),dtype=numpy.int32)).flatten()
+        self.jK = numpy.kron(self.edofMat, numpy.ones((1, 24),dtype=numpy.int32)).flatten()
+        
+    def compute_young_moduli(self, x: numpy.ndarray, dE: numpy.ndarray = None
+                              ) -> numpy.ndarray:
+         """
+         Compute the Young's modulus of each element from the densties.
+
+         Optionally compute the derivative of the Young's modulus.
+
+         Parameters
+         ----------
+         x:
+             The density variable of each element.
+         dE:
+             The derivative of Young's moduli to compute. Only set if dE is not
+             None.
+
+         Returns
+         -------
+         numpy.ndarray
+             The elements' Young's modulus.
+
+         """
+         drho = None if dE is None else numpy.empty(x.shape)
+         rho = self.penalize_densities(x, drho)
+         if drho is not None and dE is not None:
+             assert(dE.shape == x.shape)
+             dE[:] = (self.Emax - self.Emin) * drho
+         return (self.Emax - self.Emin) * rho + self.Emin
+     
+        
+    def build_K(self, xPhys: numpy.ndarray, remove_constrained: bool = True
+                 ) -> scipy.sparse.coo_matrix:
+         """
+         Build the stiffness matrix for the problem.
+
+         Parameters
+         ----------
+         xPhys:
+             The element densisities used to build the stiffness matrix.
+         remove_constrained:
+             Should the constrained nodes be removed?
+
+         Returns
+         -------
+         scipy.sparse.coo_matrix
+             The stiffness matrix for the mesh.
+
+         """
+         sK = ((self.KE.flatten()[numpy.newaxis]).T *
+               self.compute_young_moduli(xPhys)).flatten(order='F')
+         K = scipy.sparse.coo_matrix(
+             (sK, (self.iK, self.jK)), shape=(self.ndof, self.ndof))
+         K = (K+numpy.transpose(K))/2
+         if remove_constrained:
+             # Remove constrained dofs from matrix and convert to coo
+             K = deleterowcol(K.tocsc(), self.fixed, self.fixed).tocoo()
+         return K
+     
+    def compute_displacements(self, xPhys: numpy.ndarray) -> numpy.ndarray:
+         """
+         Compute the displacements given the densities.
+
+         Compute the displacment, :math:`u`, using linear elastic finite
+         element analysis (solving :math:`Ku = f` where :math:`K` is the
+         stiffness matrix and :math:`f` is the force vector).
+
+         Parameters
+         ----------
+         xPhys:
+             The element densisities used to build the stiffness matrix.
+
+         Returns
+         -------
+         numpy.ndarray
+             The distplacements solve using linear elastic finite element
+             analysis.
+
+         """
+         # Setup and solve FE problem
+         K = self.build_K(xPhys)
+         K = cvxopt.spmatrix(
+             K.data, K.row.astype(int), K.col.astype(int))
+         # Solve system
+         F = cvxopt.matrix(self.f[self.free, :])
+         cvxopt.cholmod.linsolve(K, F)  # F stores solution after solve
+         new_u = self.u.copy()
+         new_u[self.free, :] = numpy.array(F)[:, :]
+         return new_u
+     
+    def update_displacements(self, xPhys: numpy.ndarray) -> None:
+         """
+         Update the displacements of the problem.
+
+         Parameters
+         ----------
+         xPhys:
+             The element densisities used to compute the displacements.
+
+         """
+         self.u[:, :] = self.compute_displacements(xPhys)
+    
+    def compute_compliance(
+            self, xPhys: numpy.ndarray, dobj: numpy.ndarray) -> float:
+        r"""
+        Compute compliance and its gradient.
+
+        The objective is :math:`\mathbf{f}^{T} \mathbf{u}`. The gradient of
+        the objective is
+
+        :math:`\begin{align}
+        \mathbf{f}^T\mathbf{u} &= \mathbf{f}^T\mathbf{u} -
+        \boldsymbol{\lambda}^T(\mathbf{K}\mathbf{u} - \mathbf{f})\\
+        \frac{\partial}{\partial \rho_e}(\mathbf{f}^T\mathbf{u}) &=
+        (\mathbf{K}\boldsymbol{\lambda} - \mathbf{f})^T
+        \frac{\partial \mathbf u}{\partial \rho_e} +
+        \boldsymbol{\lambda}^T\frac{\partial \mathbf K}{\partial \rho_e}
+        \mathbf{u}
+        = \mathbf{u}^T\frac{\partial \mathbf K}{\partial \rho_e}\mathbf{u}
+        \end{align}`
+
+        where :math:`\boldsymbol{\lambda} = \mathbf{u}`.
+
+        Parameters
+        ----------
+        xPhys:
+            The element densities.
+        dobj:
+            The gradient of compliance.
+
+        Returns
+        -------
+        float
+            The compliance value.
+
+        """
+        # Setup and solve FE problem
+        self.update_displacements(xPhys)
+
+        obj = 0.0
+        dobj[:] = 0.0
+        dE = numpy.empty(xPhys.shape)
+        E = self.compute_young_moduli(xPhys, dE)
+        for i in range(self.nloads):
+            ui = self.u[:, i][self.edofMat].reshape(-1, 24)
+            self.obje[:] = (ui @ self.KE * ui).sum(1)
+            obj += (E * self.obje).sum()
+            dobj[:] += -dE * self.obje
+        dobj /= float(self.nloads)
+        return obj / float(self.nloads)
+    
+    def compute_volume(
+            self, x: numpy.ndarray, grad: numpy.ndarray) -> float:
+        """
+        Compute m problem constraints and their gradients
+        https://nlopt.readthedocs.io/en/latest/NLopt_Python_Reference/#vector-valued-constraints
+
+        If the argument grad is not empty (which is the case for MMA),
+        then grad is a 2d NumPy array of size m×n (m = number of constraints
+        n = number of design variables) which should (upon return)
+        be set in-place to the gradient of the function with
+        respect to the optimization parameters at x. [from nlopt docs]
+
+        Parameters
+        ----------
+        result:
+            The design variables.
+        grad:
+            The gradient of the nonlinear constraint wrt the design variables
+
+        Returns
+        -------
+        float
+            the constraint value(s) and derivatives
+
+        """
+        # Filter design variables
+        # self.filter_variables(x) # [pag]: This was commented for some reason
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
+
+        # Volume sensitivities
+        grad[:] = 1.0
+
+        # Sensitivity filtering
+        if self.FilterOn:
+            self.filter.filter_volume_sensitivities(self.xPhys, grad[:])
+
+        return self.xPhys.sum()
+    
+class ComplianceNoRBE2Problem2(ElasticityNoRBE2Problem2):
+    r"""
+    Topology optimization problem to minimize compliance without RBE2 .
+
+    :math:`\begin{aligned}
+    \min_{\boldsymbol{\rho}} \quad & \mathbf{f}^T\mathbf{u}\\
+    \textrm{subject to}: \quad & \mathbf{K}\mathbf{u} = \mathbf{f}\\
+    & \sum_{e=1}^N v_e\rho_e \leq V_\text{frac},
+    \quad 0 < \rho_\min \leq \rho_e \leq 1\\
+    \end{aligned}`
+
+    where :math:`\mathbf{f}` are the forces, :math:`\mathbf{u}` are the \
+    displacements, :math:`\mathbf{K}` is the striffness matrix, and :math:`V`
+    is the volume.
+    """ 
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, FilterOn:bool, 
+                 constraints: numpy.ndarray, constraints_f):
+        super().__init__(bc, penalty, volfrac, filter, FilterOn, constraints, constraints_f)
+        
+    def objective_function(
+            self, x: numpy.ndarray, dobj: numpy.ndarray) -> float:
+        """
+        Compute the objective value and gradient.
+
+        Parameters
+        ----------
+        x:
+            The design variables for which to compute the objective.
+        dobj:
+            The gradient of the objective to compute.
+
+        Returns
+        -------
+        float
+            The objective value.
+
+        """
+        start = time.time()
+   
+        self.iter += 1
+        # Filter design variables
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
+
+        # Objective and sensitivity
+        obj = self.compute_compliance(self.xPhys, dobj)
+
+        # Sensitivity filtering
+        if self.FilterOn:
+            self.filter.filter_objective_sensitivities(self.xPhys, dobj)
+
+        # Display physical variables
+        #if self.gui != 0:
+            #self.gui.update(self.xPhys)
+        
+        current_volfrac = self.xPhys.sum()/ self.nel
+
+        print("iter.: {} | Obj: {:.5f} | Volfrac: {:.5f} | Penalty: {:.2f} | Filter: {} | Time: {:.5f}".format(self.iter,obj,current_volfrac,self.penalty,self.FilterOn,time.time() - start) )
+        return obj
+    
+    def constraints_function(
+            self, result, x: numpy.ndarray, grad: numpy.ndarray) -> float:
+        """
+        Compute m problem constraints and their gradients
+        https://nlopt.readthedocs.io/en/latest/NLopt_Python_Reference/#vector-valued-constraints
+
+        If the argument grad is not empty (which is the case for MMA),
+        then grad is a 2d NumPy array of size m×n (m = number of constraints
+        n = number of design variables) which should (upon return)
+        be set in-place to the gradient of the function with
+        respect to the optimization parameters at x. [from nlopt docs]
+
+        Parameters
+        ----------
+        result:
+            The design variables.
+        grad:
+            The gradient of the nonlinear constraint wrt the design variables
+
+        Returns
+        -------
+        float
+            the constraint value(s) and derivatives
+
+        """
+        result[0] = self.compute_volume(x, grad[0, :]) - self.volfrac * x.size
+
+class ComplianceNoRBE2Problem3(ElasticityNoRBE2Problem3):
+    r"""
+    Topology optimization problem to minimize compliance without RBE2 .
+
+    :math:`\begin{aligned}
+    \min_{\boldsymbol{\rho}} \quad & \mathbf{f}^T\mathbf{u}\\
+    \textrm{subject to}: \quad & \mathbf{K}\mathbf{u} = \mathbf{f}\\
+    & \sum_{e=1}^N v_e\rho_e \leq V_\text{frac},
+    \quad 0 < \rho_\min \leq \rho_e \leq 1\\
+    \end{aligned}`
+
+    where :math:`\mathbf{f}` are the forces, :math:`\mathbf{u}` are the \
+    displacements, :math:`\mathbf{K}` is the striffness matrix, and :math:`V`
+    is the volume.
+    """ 
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, FilterOn:bool, 
+                 constraints: numpy.ndarray, constraints_f):
+        super().__init__(bc, penalty, volfrac, filter, FilterOn, constraints, constraints_f)
+        
+    def objective_function(
+            self, x: numpy.ndarray, dobj: numpy.ndarray) -> float:
+        """
+        Compute the objective value and gradient.
+
+        Parameters
+        ----------
+        x:
+            The design variables for which to compute the objective.
+        dobj:
+            The gradient of the objective to compute.
+
+        Returns
+        -------
+        float
+            The objective value.
+
+        """
+        start = time.time()
+   
+        self.iter += 1
+        # Filter design variables
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
+
+        # Objective and sensitivity
+        obj = self.compute_compliance(self.xPhys, dobj)
+
+        # Sensitivity filtering
+        if self.FilterOn:
+            self.filter.filter_objective_sensitivities(self.xPhys, dobj)
+
+        # Display physical variables
+        #if self.gui != 0:
+            #self.gui.update(self.xPhys)
+        
+        current_volfrac = self.xPhys.sum()/ self.nel
+
+        print("iter.: {} | Obj: {:.5f} | Volfrac: {:.5f} | Penalty: {:.2f} | Filter: {} | Time: {:.5f}".format(self.iter,obj,current_volfrac,self.penalty,self.FilterOn,time.time() - start) )
+        return obj
+    
+    def constraints_function(
+            self, result, x: numpy.ndarray, grad: numpy.ndarray) -> float:
+        """
+        Compute m problem constraints and their gradients
+        https://nlopt.readthedocs.io/en/latest/NLopt_Python_Reference/#vector-valued-constraints
+
+        If the argument grad is not empty (which is the case for MMA),
+        then grad is a 2d NumPy array of size m×n (m = number of constraints
+        n = number of design variables) which should (upon return)
+        be set in-place to the gradient of the function with
+        respect to the optimization parameters at x. [from nlopt docs]
+
+        Parameters
+        ----------
+        result:
+            The design variables.
+        grad:
+            The gradient of the nonlinear constraint wrt the design variables
+
+        Returns
+        -------
+        float
+            the constraint value(s) and derivatives
+
+        """
+        result[0] = self.compute_volume(x, grad[0, :]) - self.volfrac * x.size
+
+
 class ElasticityProblem2(Problem):
     """
     Abstract elasticity topology optimization problem.
@@ -246,7 +1022,7 @@ class ElasticityProblem2(Problem):
 
     """
 
-    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, constraints, constraints_f, gui):
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, FilterOn: bool, constraints, constraints_f, gui):
         """
         Create the topology optimization problem.
 
@@ -258,19 +1034,13 @@ class ElasticityProblem2(Problem):
             The penalty value used to penalize fractional densities in SIMP.
 
         """
-        super().__init__(bc, penalty, volfrac, filter)
+        super().__init__(bc, penalty, volfrac, filter, FilterOn)
         # Max and min stiffness
         self.Emin = 1e-9 # Don't set it to 0 because singularities
         self.Emax = 1.0 # In this line, this should remain at E=1 to avoid scaling lk twice. Can be modified from main() after creating problem class instance.
         
         # FE: Build the index vectors for the for coo matrix format.
         self.nu = 0.33 # This has to be set to the desired value already from class creation (either here or setting it as additional input for __init__)
-
-        # BC's and support (half MBB-beam)
-        self.bc = bc
-        dofs = numpy.arange(self.ndof)
-        self.fixed = bc.fixed_nodes
-        self.free = numpy.setdiff1d(dofs, self.fixed)
 
         # Number of loads
         self.nloads = self.f.shape[1]
@@ -565,7 +1335,7 @@ class ElasticityProblem2(Problem):
             xPhys[self.passive] = 0
         else:
             self.passive = scipy.sparse.csr_matrix(xPhys < 0)
-            # self.Emin = 1e-9
+
 
         # building stiffness matrix
         K = self.build_K(xPhys)
@@ -747,16 +1517,17 @@ class ElasticityProblem2(Problem):
         """
         # Filter design variables
         # self.filter_variables(x) # [pag]: This was commented for some reason
-        self.xPhys = x.copy()
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
 
         # Volume sensitivities
         grad[:] = 1.0
 
         # Sensitivity filtering
-
-        self.filter.filter_volume_sensitivities(self.xPhys, grad[:])
-
-        # print('Vfrac: ', self.xPhys.sum() / (self.nelx * self.nely * self.nelz), '\n')
+        if self.FilterOn:
+            self.filter.filter_volume_sensitivities(self.xPhys, grad[:])
 
         return self.xPhys.sum()
 
@@ -970,7 +1741,7 @@ class ElasticityProblem3(Problem):
         The number of loads applied to the material.
 
     """
-    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, constraints, constraints_f, gui):
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, FilterOn: bool, constraints, constraints_f, gui):
         """
         Create the topology optimization problem.
 
@@ -982,7 +1753,7 @@ class ElasticityProblem3(Problem):
             The penalty value used to penalize fractional densities in SIMP.
 
         """
-        super().__init__(bc, penalty, volfrac, filter)
+        super().__init__(bc, penalty, volfrac, filter,FilterOn)
         # Max and min stiffness
         # self.Emin = 1e-9
         self.Emin = 0
@@ -1705,15 +2476,17 @@ class ElasticityProblem3(Problem):
 
         """
         # Filter design variables
-        # self.filter_variables(x)
-        self.xPhys = x.copy()
+        if self.FilterOn: 
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
 
         # Volume sensitivities
         grad[:] = 1.0
 
         # Sensitivity filtering
-
-        self.filter.filter_volume_sensitivities(self.xPhys, grad[:])
+        if self.FilterOn:
+            self.filter.filter_volume_sensitivities(self.xPhys, grad[:])
 
         print('Volume: ', self.xPhys.sum() / (self.nelx * self.nely * self.nelz), '\n')
 
@@ -1925,7 +2698,7 @@ class ComplianceProblem2(ElasticityProblem2):
     displacements, :math:`\mathbf{K}` is the striffness matrix, and :math:`V`
     is the volume.
     """
-    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, 
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, FilterOn:bool, 
                  constraints: numpy.ndarray, constraints_f, gui, domain_lens=None, joint_locs=None):
         
         if domain_lens==None:
@@ -1941,7 +2714,7 @@ class ComplianceProblem2(ElasticityProblem2):
         # self.joint_locx = joint_locs[0]
         # self.joint_locy = joint_locs[1]
         
-        super().__init__(bc, penalty, volfrac, filter, constraints, constraints_f, gui)
+        super().__init__(bc, penalty, volfrac, filter, FilterOn, constraints, constraints_f, gui)
         
     def objective_function(
             self, x: numpy.ndarray, dobj: numpy.ndarray) -> float:
@@ -1965,14 +2738,17 @@ class ComplianceProblem2(ElasticityProblem2):
         print(self.iter)
         self.iter += 1
         # Filter design variables
-        self.filter_variables(x)
-        # self.xPhys = x.copy()
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
 
         # Objective and sensitivity
         obj = self.compute_compliance(self.xPhys, dobj)
 
         # Sensitivity filtering
-        self.filter.filter_objective_sensitivities(self.xPhys, dobj)
+        if self.FilterOn:
+            self.filter.filter_objective_sensitivities(self.xPhys, dobj)
 
         # Display physical variables
         if self.gui != 0:
@@ -2067,14 +2843,17 @@ class ComplianceProblem3(ElasticityProblem3):
         self.iter += 1
 
         # Filter design variables
-        # self.filter_variables(x)
-        self.xPhys = x.copy()
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
 
         # Objective and sensitivity
         obj = self.compute_compliance(self.xPhys, dobj)
 
         # Sensitivity filtering
-        self.filter.filter_objective_sensitivities(self.xPhys, dobj)
+        if self.FilterOn:
+            self.filter.filter_objective_sensitivities(self.xPhys, dobj)
 
         print('Displacement: ', obj, '\n')
         print('elapsed_time', time.time() - start)
@@ -2175,8 +2954,10 @@ class MinMassProblem2(ElasticityProblem2):
 
         """
         # Filter design variables
-        # self.filter_variables(x)
-        self.xPhys = x.copy()
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
 
         # calculate displacement for force/moment on each master dof -> combinations can be calculated quickly
         if self.init == 1 and len(self.constraints) > 2:
@@ -2189,7 +2970,8 @@ class MinMassProblem2(ElasticityProblem2):
             obj = self.compute_compliance(self.xPhys, dc)
 
         # Sensitivity filtering
-        self.filter.filter_objective_sensitivities(self.xPhys, dc)
+        if self.FilterOn:
+            self.filter.filter_objective_sensitivities(self.xPhys, dc)
         return obj
 
 
@@ -2368,8 +3150,10 @@ class MinMassProblem3(ElasticityProblem3):
             x = numpy.reshape(x, x.size, order='C')
 
         # Filter design variables
-        # self.filter_variables(x)
-        self.xPhys = x.copy()
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
 
         # calculate displacement for force/moment on each master dof -> combinations can be calculated quickly
         if self.init == 1 and len(self.constraints) > 4:
@@ -2382,7 +3166,8 @@ class MinMassProblem3(ElasticityProblem3):
             obj = self.compute_compliance(self.xPhys, dc)
 
         # Sensitivity filtering
-        self.filter.filter_objective_sensitivities(self.xPhys, dc)
+        if self.FilterOn:
+            self.filter.filter_objective_sensitivities(self.xPhys, dc)
         return obj
 
 
@@ -2516,7 +3301,7 @@ class MinMassRedKentries2(ElasticityProblem2):
     r"""
     Topology optimization problem to minimize mass given [4x4] reduced stiffness matrix entries
     """
-    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, 
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, FilterOn:bool, 
                  constraints: numpy.ndarray, constraints_f, gui, domain_lens, joint_locs):
         
         # Element physical lengths in x and y
@@ -2527,7 +3312,7 @@ class MinMassRedKentries2(ElasticityProblem2):
         self.joint_locx = joint_locs[0]
         self.joint_locy = joint_locs[1]
         
-        super().__init__(bc, penalty, volfrac, filter, constraints, constraints_f, gui)
+        super().__init__(bc, penalty, volfrac, filter, FilterOn, constraints, constraints_f, gui)
         
         self.Kreq = constraints[0:3] # Required stiffness entries (k00, k11, k33)
         self.keepDoFIds, self.delDoFIds = self.buildStaticCondensationIndices()
@@ -2584,7 +3369,10 @@ class MinMassRedKentries2(ElasticityProblem2):
     
         """
         # Generate xPhys
-        self.filter_variables(x)
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
         
         if self.gui != 0:
             self.gui.update(self.xPhys)
@@ -2646,15 +3434,15 @@ class MinMassRedKentries2(ElasticityProblem2):
         
         # t1_grad = time.perf_counter()        
         # print(f'Gradient computation time: {t1_grad-t0_grad} second(s)')
-
-        self.filter.filter_constraint_sensitivities(self.xPhys, grad)
+        if self.FilterOn:
+            self.filter.filter_constraint_sensitivities(self.xPhys, grad)
 
 class MinMassRedKentries3(ElasticityProblem3):
     r"""
     Topology optimization problem to minimize mass given [4x4] reduced stiffness matrix entries
     """
-    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, constraints: numpy.ndarray, constraints_f, gui):
-        super().__init__(bc, penalty, volfrac, filter, constraints, constraints_f, gui)
+    def __init__(self, bc: BoundaryConditions, penalty: float, volfrac: float, filter: Filter, FilterOn: bool, constraints: numpy.ndarray, constraints_f, gui):
+        super().__init__(bc, penalty, volfrac, filter, FilterOn, constraints, constraints_f, gui)
         self.Kreq = constraints[0:3] # Required stiffness entries (k00, k11, k33)
         
     def objective_function(
@@ -2693,8 +3481,10 @@ class MinMassRedKentries3(ElasticityProblem3):
     
         """
         # Generate xPhys
-        self.filter_variables(x)
-        
+        if self.FilterOn:
+            self.filter_variables(x)
+        else:
+            self.xPhys = x.copy()
         # No gui in 3D ?
         # if self.gui != 0:
         #     self.gui.update(self.xPhys)
@@ -2728,8 +3518,8 @@ class MinMassRedKentries3(ElasticityProblem3):
                 grad[:,i] = [-dKgr[0,0]/K00, -dKgr[1,1]/K11, -dKgr[3,3]/K33, dKgr[0,0]/K00, dKgr[1,1]/K11, dKgr[3,3]/K33]  
                 # if i%1000 == 0:
                     # print(i) 
-             
-        self.filter.filter_constraint_sensitivities(self.xPhys, grad)
+        if self.FilterOn:     
+            self.filter.filter_constraint_sensitivities(self.xPhys, grad)
 
 class HarmonicLoadsProblem(ElasticityProblem2):
     r"""
@@ -3204,6 +3994,6 @@ class VonMisesStressProblem(ElasticityProblem2):
 
     def compute_objective(self, xPhys, dobj):
         """Compute compliance and its gradient."""
-        obj = ComplianceProblem.compute_objective(self, xPhys, dobj)
+        obj = ComplianceProblem2.compute_objective(self, xPhys, dobj)
         self.compute_stress_objective(xPhys, numpy.zeros(dobj.shape))
         return obj

@@ -42,7 +42,7 @@ class TopOptSolver:
         self.opt = nlopt.opt(nlopt.LD_MMA, n)
         self.opt.set_param('inner_maxeval', 10)
         self.opt.set_param('verbosity', 0)
-        self.xPhys = numpy.ones(n)
+        #self.xPhys = numpy.ones(n)  # not binding to the xPhys of problem and keep reset xPhys
         self.n_constraints = n_constraints
 
         # set bounds on the value of x (0 ≤ x ≤ 1)
@@ -121,7 +121,7 @@ class TopOptSolver:
             The optimal value of x found.
 
         """
-        self.xPhys = x.copy()
+        #self.xPhys = x.copy()
         x = self.opt.optimize(x)
         return x
 
@@ -191,6 +191,9 @@ class OCSolver(TopOptSolver):
                 l2 = lmid
         return xnew
 
+##
+# no filter appied yet
+##
     def optimize(self, x: numpy.ndarray):
         maxiter = 40
         i = 0

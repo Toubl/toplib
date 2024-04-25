@@ -5,9 +5,11 @@ import abc
 
 # Import modules
 import numpy
+import math
 
 # Import TopOpt modules
 from .utils import xy_to_id
+from .utils import xyz_to_id
 
 
 class BoundaryConditions(abc.ABC):
@@ -79,6 +81,86 @@ class BoundaryConditions(abc.ABC):
     def active_elements(self):
         """:obj:`numpy.ndarray`: Active elements to be set to full density."""
         return numpy.array([])
+
+class CantileverCenterDistributedLoadBoundaryCondition(BoundaryConditions):
+    """boundary conditions for a cantilever beam 
+    with a unit load distrubuted over the central 20% of the free edge"""
+    
+    @property
+    def fixed_nodes(self):
+        """:obj:`numpy.ndarray`: Fixed nodes on the left."""
+        
+        if self.nelz > 1: # 3D case
+            ys = numpy.arange( self.nely + 1 )
+            zs = numpy.arange( self.nelz + 1 )
+            leftEnd_to_id = numpy.vectorize(
+                lambda y,z : xyz_to_id(0, y, z, self.nelx, self.nely, self.nelz))
+            ids = numpy.array([],dtype = numpy.int32)
+            for index_z in zs:
+                ids = numpy.append(ids, leftEnd_to_id(ys, index_z))
+            fixed = numpy.unique(numpy.concatenate((3*ids, 3*ids + 1, 3*ids + 2)))
+        else: # 2D case
+            ys = numpy.arange( self.nely + 1 )    
+            leftEnd_to_id = numpy.vectorize(
+                lambda y : xy_to_id(0, y, self.nelx, self.nely))
+            ids = leftEnd_to_id(ys)
+            fixed = numpy.union1d(2*ids, 2*ids + 1 )
+        
+        return fixed
+     
+    @property    
+    def forces(self):
+        """:obj:`numpy.ndarray`: Force vector in the central 20% of right egde."""
+        f = self.f
+        return f
+    
+    def set_forces(self, F, percentage=0.2):
+        """
+        Create force vector according to the percentage of distributed load at the center.
+
+        Parameters
+        ----------
+        F:
+            the magnitude of load, default is one unit load case.
+            can add more load cases and change the magnitude.
+        percentage:
+            the percentage of distributed load at the central area.
+            default is 20%.
+
+        """
+        self.f = numpy.zeros((self.ndof,F.shape[1]))
+        if self.nelz > 1: # 3D
+            # define the ids of loaded nodes
+            load_index_y = numpy.arange(math.ceil(self.nely*(0.5-percentage/2)), math.ceil(self.nely*(0.5+percentage/2)))
+            load_index_z = numpy.arange(math.ceil(self.nelz*(0.5-percentage/2)), math.ceil(self.nelz*(0.5+percentage/2)))
+            load_index = numpy.vectorize((lambda y,z: xyz_to_id(self.nelx, y, z, self.nelx, self.nely, self.nelz)))
+            index = numpy.array([],dtype = numpy.int32)
+            for index_z in load_index_z:
+                index = numpy.append(index, load_index(load_index_y, index_z))
+            index = 3*index + 1
+            
+            # define the distributed load
+            number_load_index = numpy.size(index)
+            load = F/number_load_index
+            
+            load_matrix = numpy.tile(load, (number_load_index,1))
+            self.f[index,:] = load_matrix
+
+        else:
+            # define the ids of loaded nodes
+            load_index_y = numpy.arange(math.ceil((self.nely)*(0.5-percentage/2)), math.ceil((self.nely)*(0.5+percentage/2)))
+            load_index = numpy.vectorize(lambda y: xy_to_id(self.nelx, y, self.nelx, self.nely))
+            # loaded dofs
+            index = 2*load_index(load_index_y) + 1
+            
+            # define the distributed load
+            number_load_index = numpy.size(index)
+            load = F/number_load_index
+            load_matrix = numpy.tile(load, (number_load_index,1))
+            self.f[index,:] = load_matrix
+
+    
+        
 
 class FixedBeamBoundaryConditions(BoundaryConditions):
     """Boundary conditions for a beam fixed on one end."""

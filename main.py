@@ -28,6 +28,7 @@ nelx, nely, nelz = 80, 20, 20
 volfrac = 0.2  # Volume fraction for constraints
 penal = 3  # Penalty for SIMP
 rmin = 2
+FilterOn = 1
 # Initial solution
 x = volfrac * numpy.ones(nely * nelx * nelz, dtype=float)                        
 file_path = 'x_opt.txt'
@@ -54,7 +55,7 @@ constraints_f = []
 topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 
 # Problem to optimize given objective and constraints
-problem = ComplianceProblem3(bc, penal, volfrac, topopt_filter, constraints, constraints_f, 0)
+problem = ComplianceProblem3(bc, penal, volfrac, topopt_filter,FilterOn, constraints, constraints_f, 0)
 problem.reducedofs = 1  # delete dofs of elements that are close to zero in density, speeding up optimization
 solver = TopOptSolver(problem, len(constraints))
 

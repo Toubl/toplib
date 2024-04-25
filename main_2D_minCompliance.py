@@ -37,7 +37,7 @@ file_path = 'x_opt.txt'
 
 # Boundary conditions defining the loads and fixed points
 bc = FixedBeamBoundaryConditions(nelx, nely, nelz)
-# bc = CantileverBoundaryConditions(nelx, nely, nelz)
+#bc = CantileverBoundaryConditions(nelx, nely, nelz)
 # bc = RedKentriesBoundaryConditions(nelx, nely, nelz)
 
 # define force vector

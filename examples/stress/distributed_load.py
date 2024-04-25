@@ -18,7 +18,8 @@ def main():
     # Default input parameters
     nelx, nely, volfrac, penalty, rmin, ft = cli.parse_args(
         nelx=120, volfrac=0.2, rmin=1.2)
-    bc = DistributedLoadBoundaryConditions(nelx, nely)
+    nelz = 1
+    bc = DistributedLoadBoundaryConditions(nelx, nely,nelz)
     problem = VonMisesStressProblem(nelx, nely, penalty, bc)
     gui = StressGUI(problem, title="Stresses of Distributed Load Example")
     cli.main(nelx, nely, volfrac, penalty, rmin, ft, bc=bc,

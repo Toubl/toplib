@@ -29,6 +29,7 @@ nelx, nely, nelz = 160, 80, 1  # Number of elements in the x y and z-direction
 volfrac = 0.2  # Volume fraction for constraints
 penal = 3  # Penalty for SIMP
 rmin = 2
+FilterOn = 1
 # Initial solution
 x = volfrac * numpy.ones(nely * nelx * nelz, dtype=float)
 file_path = 'x_opt.txt'  # Replace with the actual file path
@@ -54,7 +55,7 @@ gui = GUI(bc, "Topology Optimization Example")
 topopt_filter = DensityBasedFilter(nelx, nely, nelz, rmin)
 
 # Problem to optimize given objective and constraints
-problem = ComplianceProblem2(bc, penal, volfrac, topopt_filter, constraints, constraints_f, gui)
+problem = ComplianceProblem2(bc, penal, volfrac, topopt_filter,FilterOn, constraints, constraints_f, gui)
 problem.reducedofs = 1  # delete dofs of elements that are close to zero in density, speeding up optimization
 solver = TopOptSolver(problem, len(constraints))
 

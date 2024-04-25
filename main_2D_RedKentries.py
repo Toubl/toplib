@@ -33,7 +33,7 @@ nelx, nely, nelz = 16, 16, 1
 elem_lenx = 6.125 # mm
 print(f'Domain length = {nelx*elem_lenx}')
 elem_leny = 6.125 # mm
-# nelx, nely, nelz = 38, 13, 1 # This seems to work!!!
+#nelx, nely, nelz = 38, 13, 1 # This seems to work!!!
 # nelx, nely, nelz = 5, 1, 1
 volfrac = 0.9 # Volume fraction
 penal = 3  # Penalty for SIMP
@@ -112,7 +112,7 @@ mass = total_volume*volume_fraction*rho_material
 print(f'Component Mass: {mass}')
 
 # display optimized topology
-# x_to_stl(nelx, nely, nelz, 0.1, x_opt, 'output.stl')
+x_to_stl(nelx, nely, nelz, 0.1, x_opt, 'output.stl')
 
 # save optimized density values to txt file
 # with open(file_path, 'w') as file:

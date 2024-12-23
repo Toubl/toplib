@@ -6,12 +6,14 @@ Todo:
     * Rename the current TopOptSolver to MMASolver(TopOptSolver)
     * Create a TopOptSolver using originality criterion
 """
+
 from __future__ import division
 
 import numpy
 import nlopt
 
 from topopt.problems import Problem
+
 
 class TopOptSolver:
     """Solver for topology optimization problems using NLopt's MMA solver."""
@@ -40,8 +42,8 @@ class TopOptSolver:
 
         n = problem.nelx * problem.nely * problem.nelz
         self.opt = nlopt.opt(nlopt.LD_MMA, n)
-        self.opt.set_param('inner_maxeval', 10)
-        self.opt.set_param('verbosity', 0)
+        self.opt.set_param("inner_maxeval", 10)
+        self.opt.set_param("verbosity", 0)
         self.xPhys = numpy.ones(n)
         self.n_constraints = n_constraints
 
@@ -55,12 +57,16 @@ class TopOptSolver:
         self.xtol_rel = ftol_rel
 
         # setting objective and constraints function(s)
-        if (n_constraints == 0):
+        if n_constraints == 0:
             self.opt.set_min_objective(self.problem.objective_function)
-            self.opt.add_inequality_mconstraint(self.problem.constraints_function, numpy.zeros(1))
-        elif (n_constraints != 0):
+            self.opt.add_inequality_mconstraint(
+                self.problem.constraints_function, numpy.zeros(1)
+            )
+        elif n_constraints != 0:
             self.opt.set_min_objective(self.problem.objective_function)
-            self.opt.add_inequality_mconstraint(self.problem.constraints_function, numpy.zeros(n_constraints))
+            self.opt.add_inequality_mconstraint(
+                self.problem.constraints_function, numpy.zeros(n_constraints)
+            )
 
     def __str__(self):
         """Create a string representation of the solver."""
@@ -72,16 +78,16 @@ class TopOptSolver:
 
     def __repr__(self):
         """Create a representation of the solver."""
-        return ("{}(problem={!r}, volfrac={:g}, filter={!r}, ".format(
-            self.__class__.__name__, self.problem, self.volfrac, self.filter)
-            + "gui={!r}, maxeval={:d}, ftol={:g})".format(
-                self.gui, self.opt.get_maxeval(), self.opt.get_ftol_rel()))
+        return "{}(problem={!r}, volfrac={:g}, filter={!r}, ".format(
+            self.__class__.__name__, self.problem, self.volfrac, self.filter
+        ) + "gui={!r}, maxeval={:d}, ftol={:g})".format(
+            self.gui, self.opt.get_maxeval(), self.opt.get_ftol_rel()
+        )
 
     @property
     def ftol_rel(self):
         """:obj:`float`: Relative tolerance for convergence."""
         return self.opt.get_ftol_rel()
-
 
     @ftol_rel.setter
     def ftol_rel(self, ftol_rel):
@@ -91,7 +97,6 @@ class TopOptSolver:
     def xtol_rel(self):
         """:obj:`float`: Relative tolerance for convergence."""
         return self.opt.get_xtol_rel()
-
 
     @xtol_rel.setter
     def xtol_rel(self, xtol_rel):
@@ -125,10 +130,9 @@ class TopOptSolver:
         x = self.opt.optimize(x)
         return x
 
-
-
-    def objective_function_fdiff(self, x: numpy.ndarray, dobj: numpy.ndarray,
-                                 epsilon=1e-6) -> float:
+    def objective_function_fdiff(
+        self, x: numpy.ndarray, dobj: numpy.ndarray, epsilon=1e-6
+    ) -> float:
         """
         Compute the objective value and gradient using finite differences.
 
@@ -159,8 +163,7 @@ class TopOptSolver:
             x[i] = x0[i] - epsilon
             o2 = self.objective_function(x, dobj)
             dobjf[i] = (o1 - o2) / (2 * epsilon)
-            print("finite differences: {:g}".format(
-                numpy.linalg.norm(dobjf - dobj0)))
+            print("finite differences: {:g}".format(numpy.linalg.norm(dobjf - dobj0)))
             dobj[:] = dobj0
         return obj
 
@@ -173,7 +176,7 @@ class TopOptSolver:
 # TODO: Port over OC to TopOptSolver
 class OCSolver(TopOptSolver):
     def oc(self, x, volfrac, dc):
-        """ Optimality criterion """
+        """Optimality criterion"""
         l1 = 0
         l2 = 1e9
         move = volfrac / 2
@@ -182,9 +185,20 @@ class OCSolver(TopOptSolver):
 
         while ((l2 - l1) / (l1 + l2)) > 1e-3:
             lmid = 0.5 * (l2 + l1)
-            xnew[:] = numpy.maximum(0.0, numpy.maximum(x - move, numpy.minimum(1.0,
-                               numpy.minimum(x + move, x * numpy.sqrt(-dc / lmid)))))
-            gt = numpy.sum(xnew)/(self.problem.nelx * self.problem.nely * self.problem.nelz) - volfrac
+            xnew[:] = numpy.maximum(
+                0.0,
+                numpy.maximum(
+                    x - move,
+                    numpy.minimum(
+                        1.0, numpy.minimum(x + move, x * numpy.sqrt(-dc / lmid))
+                    ),
+                ),
+            )
+            gt = (
+                numpy.sum(xnew)
+                / (self.problem.nelx * self.problem.nely * self.problem.nelz)
+                - volfrac
+            )
             if gt > 0:
                 l1 = lmid
             else:
@@ -222,7 +236,9 @@ class OCSolver(TopOptSolver):
             x = x_new
             i = i + 1
 
-        self.filter = DensityBasedFilter(self.problem.nelx, self.problem.nely, self.problem.nelz, 1.5)
+        self.filter = DensityBasedFilter(
+            self.problem.nelx, self.problem.nely, self.problem.nelz, 1.5
+        )
         i = 0
 
         while maxiter > i:
@@ -257,13 +273,13 @@ class OCSolver(TopOptSolver):
                 self.problem.f[0:6] = self.problem.f[0:6] * 0
                 self.problem.f[2] = 1
                 j = 0
-            # elif j == 2:
-            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
-            #     self.problem.f[4] = 10
-            #     j = j + 1
-            # elif j == 3:
-            #     self.problem.f[0:6] = self.problem.f[0:6] * 0
-            #     self.problem.f[5] = 10
+                # elif j == 2:
+                #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+                #     self.problem.f[4] = 10
+                #     j = j + 1
+                # elif j == 3:
+                #     self.problem.f[0:6] = self.problem.f[0:6] * 0
+                #     self.problem.f[5] = 10
                 j = 0
             self.objective_function(x, self.dc)
             x_new = self.oc(x, self.volfrac, self.dc)
